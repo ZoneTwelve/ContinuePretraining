@@ -42,6 +42,7 @@ class LightningDataModuleX(L.LightningDataModule, ABC):
         self.pin_memory = pin_memory
 
         if self.datacollator_cls is not None:
+            datacollator_kwargs = datacollator_kwargs or {}
             self.datacollator = self.datacollator_cls(tokenizer, **datacollator_kwargs)
 
     def setup(self, stage: Optional[str] = None) -> None:

@@ -87,7 +87,7 @@ def main(
         dataset_path=dataset_path,
         tokenizer=model.tokenizer,
         batch_size=micro_batch_size,
-        val_batch_size=micro_batch_size_val,
+        batch_size_val=micro_batch_size_val,
         num_workers=num_workers,
     )
 

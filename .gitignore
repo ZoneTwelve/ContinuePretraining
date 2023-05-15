@@ -5,6 +5,7 @@ temp*
 /checkpoints/*
 /repos/
 /generation
+slurm-*.out
 
 !/**/.gitkeep
 
