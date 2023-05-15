@@ -1,3 +1,4 @@
+import os
 import re
 from typing import Literal, Optional, Tuple, Union, cast
 
@@ -129,18 +130,23 @@ def main(
         accumulate_grad_batches=accumulate_grad_batches,
     )
 
-    slurm_environment: SLURMEnvironment = trainer.strategy.cluster_environment
-    model.save_hyperparameters({
+    extra_hyperparameters_to_save = {
         'micro_batch_size': micro_batch_size,
         'precision': precision,
         'accumulate_grad_batches': accumulate_grad_batches,
         'gradient_clip_val': gradient_clip_val,
         'seed': seed,
-        'num_nodes': trainer.num_nodes,
-        'num_gpus': trainer.num_devices,
-        'job_name': slurm_environment.job_name(),
-        'job_id': slurm_environment.job_id()
-    })
+    }
+
+    if 'SLURM_JOB_ID' in os.environ:
+        extra_hyperparameters_to_save['slurm'] = {
+            'job_id': os.environ.get('SLURM_JOB_ID'),
+            'job_name': os.environ.get('SLURM_JOB_NAME'),
+            'num_nodes': int(os.environ.get('SLURM_JOB_NUM_NODES')),
+            'num_gpus': int(os.environ.get('SLURM_NTASKS'))
+        }
+    
+    model.save_hyperparameters(extra_hyperparameters_to_save)
 
     trainer.fit(
         model,
