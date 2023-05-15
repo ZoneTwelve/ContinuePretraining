@@ -54,6 +54,7 @@ def main(
     from lightning.pytorch.callbacks import (LearningRateMonitor,
                                              ModelCheckpoint)
     from lightning.pytorch.loggers import WandbLogger
+    from lightning.pytorch.plugins.environments import SLURMEnvironment
 
     from taide_cp.data import PretrainDataModule
     from taide_cp.lightning import DeepSpeedStrategy
@@ -74,13 +75,6 @@ def main(
         num_warmup_steps=num_warmup_steps,
         min_lr_factor=min_lr_factor,
         _load_from_checkpoint=ckpt_path is not None,
-        _extra_hyperparameters_to_save=dict(
-            micro_batch_size=micro_batch_size,
-            precision=precision,
-            accumulate_grad_batches=accumulate_grad_batches,
-            gradient_clip_val=gradient_clip_val,
-            seed=seed,
-        )
     )
 
     datamodule = PretrainDataModule(
@@ -110,6 +104,7 @@ def main(
                 notes=notes,
             )
         ],
+        plugins=[SLURMEnvironment(auto_requeue=False)],
         callbacks=[
             LearningRateMonitor(),
             ModelCheckpoint(
@@ -133,6 +128,19 @@ def main(
         benchmark=benchmark,
         accumulate_grad_batches=accumulate_grad_batches,
     )
+
+    slurm_environment: SLURMEnvironment = trainer.strategy.cluster_environment
+    model.save_hyperparameters({
+        'micro_batch_size': micro_batch_size,
+        'precision': precision,
+        'accumulate_grad_batches': accumulate_grad_batches,
+        'gradient_clip_val': gradient_clip_val,
+        'seed': seed,
+        'num_nodes': trainer.num_nodes,
+        'num_gpus': trainer.num_devices,
+        'job_name': slurm_environment.job_name(),
+        'job_id': slurm_environment.job_id()
+    })
 
     trainer.fit(
         model,

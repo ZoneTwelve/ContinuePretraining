@@ -79,17 +79,10 @@ class LightningModuleForPreTraining(LightningModuleX):
         num_warmup_steps: int = 0,
         min_lr_factor: float = 0.1,
         _load_from_checkpoint: bool = False,
-        _extra_hyperparameters_to_save: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__()
 
-        self.save_hyperparameters(
-            _extra_hyperparameters_to_save,
-            ignore=[
-                '_load_from_checkpoint',
-                '_extra_hyperparameters_to_save'
-            ]
-        )
+        self.save_hyperparameters(ignore=['_load_from_checkpoint'])
 
         self.model_path = Path(model_path)
         tokenizer_path = tokenizer_path or model_path
