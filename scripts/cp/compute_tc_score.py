@@ -93,7 +93,7 @@ class EvaluationDataCollator(DataCollator):
 def main(
     model_path: str,
     data_path: str,
-    output_path: str = 'predictions/tc_score/',
+    output_path: str = 'outputs/tc_score/',
     batch_size: int = 8,
     num_workers: int = 4,
     seed: int = 42,

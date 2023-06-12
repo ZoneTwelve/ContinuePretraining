@@ -35,16 +35,16 @@ def chunk(lst: list, n: int):
 def main(
     model_path: str,
     checkpoint_path: Optional[str] = None,
-    output_path: Optional[str] = 'generation/',
+    output_path: Optional[str] = 'outputs/generation/',
     batch_size: int = 4,
     device: str = 'cuda'
 ):
     device = torch.device(device)
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    tokenizer.add_special_tokens({'pad_token': tokenizer.bos_token})
+    tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
+    # tokenizer.add_special_tokens({'pad_token': tokenizer.bos_token})
 
     if checkpoint_path is None:
-        model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype=torch.half, low_cpu_mem_usage=True)
+        model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype='auto', low_cpu_mem_usage=True)
         model = cast(PreTrainedModel, model)
     else:
         config = AutoConfig.from_pretrained(model_path)
@@ -84,12 +84,15 @@ def main(
     output_text = []
     for batch in chunk(prompts, batch_size):
         x = tokenizer(batch, return_tensors='pt', padding=True, return_token_type_ids=False).to(model.device)
+        l = x['input_ids'].size(1)
         x = model.generate(**x, generation_config=generation_config)
-        x = tokenizer.batch_decode(x, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+        x = tokenizer.batch_decode(x[:, l:], skip_special_tokens=True, clean_up_tokenization_spaces=True)
         output_text += x
 
-    prefix = '\n\n' + '=' * 100 + '\n\n'
-    print(prefix.join(output_text))
+    for p, o in zip(prompts, output_text):
+        print(p, end=' ||| ')
+        print(o)
+        print('=' * 100)
 
     if output_path:
         output_path: Path = Path(output_path)
@@ -98,7 +101,7 @@ def main(
 
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump({
-                'generation_config': str(generation_config),
+                'generation_config': generation_config.to_diff_dict(),
                 'prompts': prompts,
                 'outputs': output_text,
             }, f, ensure_ascii=False, indent=True)

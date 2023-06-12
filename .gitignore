@@ -1,10 +1,11 @@
 # Custom
-temp*
 /data/*
 /logs/*
 /checkpoints/*
 /repos/
-/generation
+/outputs/
+
+temp*
 slurm-*.out
 
 !/**/.gitkeep
