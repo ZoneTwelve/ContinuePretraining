@@ -11,13 +11,13 @@ then
     TIME="--time=$TIME"
 fi
 
-if [ $JOB_NAME ]
+if [ ! $JOB_NAME ]
 then
-    JOB_NAME="--job-name=$JOB_NAME"
+    JOB_NAME=$(basename "$0")
 fi
 
 srun \
-    $JOB_NAME \
+    --job-name=$JOB_NAME \
     --nodes=$NODES \
     --gpus-per-node=$GPUS \
     --ntasks-per-node=1 \
