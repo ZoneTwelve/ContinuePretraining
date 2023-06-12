@@ -1,5 +1,4 @@
-import functools
-from typing import Any, Dict, Optional, cast
+from typing import Dict, Optional, cast
 
 import fire
 import torch
@@ -7,18 +6,28 @@ from accelerate import init_empty_weights
 from transformers import (AutoConfig, AutoModelForCausalLM, AutoTokenizer,
                           PreTrainedModel)
 
+from taide_cp.utils import rsetattr
 from taide_cp.utils.deepspeed import get_state_dict_from_zero_checkpoint
 
 
-def rgetattr(obj: Any, attr: str):
-    return functools.reduce(getattr, [obj] + attr.split('.'))
-
-def rsetattr(obj: Any, attr: str, val: Any):
-    pre, _, post = attr.rpartition('.')
-    return setattr(rgetattr(obj, pre) if pre else obj, post, val)
-
 def patch_state_dict(state_dict: Dict[str, torch.Tensor]):
     return {k.removeprefix('_forward_module.model.'): v for k, v in state_dict.items()}
+
+def patch_partial_embeddings(model: PreTrainedModel, state_dict: Dict[str, torch.Tensor]):
+    new_state_dict: Dict[str, torch.Tensor] = {}
+    for k, v in state_dict.items():
+        if k.endswith('.w2'):
+            new_key = k.replace('.w2', '.weight')
+            old_embeddings = model.get_parameter(new_key).data
+            num_old_embeddings = old_embeddings.size(0)
+            num_embeddings = num_old_embeddings + v.size(0)
+            embedding_size = v.size(1)
+            x = torch.empty(num_embeddings, embedding_size)
+            x[:num_old_embeddings].copy_(old_embeddings)
+            x[num_old_embeddings:].copy_(v)
+            k, v = new_key, x
+        new_state_dict[k] = v
+    return new_state_dict
 
 def load_state_dict(model: PreTrainedModel, state_dict: Dict[str, torch.Tensor]):
     for k, v in state_dict.items():
@@ -27,25 +36,30 @@ def load_state_dict(model: PreTrainedModel, state_dict: Dict[str, torch.Tensor])
     return model
 
 def main(
-    config_path: str,
     checkpoint_path: str,
     output_path: str,
+    model_path: Optional[str] = None,
     tokenizer_path: Optional[str] = None,
 ):
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path or config_path, use_fast=True)
-    config = AutoConfig.from_pretrained(config_path)
+    state_dict, hyper_parameters = get_state_dict_from_zero_checkpoint(checkpoint_path, dtype=torch.half)
+    state_dict = patch_state_dict(state_dict)
 
+    model_path = model_path or hyper_parameters['model_path']
+    tokenizer_path = tokenizer_path or hyper_parameters['tokenizer_path'] or model_path
+
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=False)
+    config = AutoConfig.from_pretrained(model_path)
     with init_empty_weights():
         model = AutoModelForCausalLM.from_config(config)
-        model = cast(PreTrainedModel, model)
+    model = cast(PreTrainedModel, model)
 
-    if tokenizer_path is not None and model.config.vocab_size != len(tokenizer):
+    if hyper_parameters['extend_tokens']:
+        model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype='auto', low_cpu_mem_usage=True)
+        model = cast(PreTrainedModel, model)
+        state_dict = patch_partial_embeddings(model, state_dict)
         model.resize_token_embeddings(len(tokenizer))
 
-    state_dict = get_state_dict_from_zero_checkpoint(checkpoint_path, dtype=torch.half)
-    state_dict = patch_state_dict(state_dict)
     model = load_state_dict(model, state_dict)
-    
     model.save_pretrained(output_path, max_shard_size='1000GB', safe_serialization=True)
     tokenizer.save_pretrained(output_path)
 

@@ -1,34 +1,32 @@
 #!/bin/bash
-#SBATCH --nodes=4
+#SBATCH --nodes=2
 #SBATCH --gpus-per-node=8
 #SBATCH --cpus-per-task=4
 #SBATCH --ntasks-per-node=8
 #SBATCH --account="GOV112003"
 #SBATCH --partition="gpNCHC_LLM"
-#SBATCH --output="logs/slurm/%j-train_stage1.log" \
+#SBATCH --output="logs/slurm/%j-train_stage1_opt.log" \
 
-# export WANDB_MODE=disabled
-
-MODEL_TYPE=llama
-MODEL_PATH=checkpoints/llama-7b
-TOKENIZER_PATH=checkpoints/tokenizer/llama-cw
-DATASET_PATH=data/cp/tokenized/llama-cw/f
+MODEL_TYPE=opt
+MODEL_PATH=checkpoints/opt-1.3b
+TOKENIZER_PATH=checkpoints/tokenizer/opt-extended
+DATASET_PATH=data/cp/opt-extended/d-2048
 CKPT_PATH=None
 
 # WandB
-NAME="llama-7b-cw_stage1-f"
+NAME="opt-1.3b-extended_stage1--d-2048"
 VERSION=""
-TAGS="llama:7b, cp, cp:stage1, tokenizer:cc, data:f"
-NOTES=""
+TAGS="opt:1.3b, cp, cp:stage1, tokenizer:extended, data:d"
+NOTES="OPT 1.3B 擴充中文字詞 Stage1"
 
 # Stage1
 EXTEND_TOKENS=True
-INITIALIZING_STRATEGY=mean # None, mean, sample
+INITIALIZING_STRATEGY=sample # None, mean, sample
 FREEZING_STRATEGY=exclude_new # None, exclude_new, exclude_all
 
 # Common
-MICRO_BATCH_SIZE=4
-MICRO_BATCH_SIZE_VAL=8
+MICRO_BATCH_SIZE=8
+MICRO_BATCH_SIZE_VAL=None
 ACCUMULATE_GRAD_BATCHES=1
 LR=1e-4
 LR_SCHEDULER_TYPE=None # None, linear, cosine

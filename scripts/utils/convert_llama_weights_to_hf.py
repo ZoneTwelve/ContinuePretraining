@@ -20,9 +20,7 @@ import shutil
 import warnings
 
 import torch
-
 from transformers import LlamaConfig, LlamaForCausalLM, LlamaTokenizer
-
 
 try:
     from transformers import LlamaTokenizerFast
@@ -237,7 +235,7 @@ def write_model(model_path, input_base_path, model_size):
     del model.config._name_or_path
 
     print("Saving in the Transformers format.")
-    model.save_pretrained(model_path, max_shard_size='1000GB', safe_serialization=True)
+    model.save_pretrained(model_path)
     shutil.rmtree(tmp_model_path)
 
 

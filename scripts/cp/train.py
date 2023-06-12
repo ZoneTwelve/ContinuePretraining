@@ -23,7 +23,7 @@ def main(
     model_path: str,
     dataset_path: str,
     tokenizer_path: Optional[str] = None,
-    project: str = 't-chatgpt',
+    project: str = 'taide_cp',
     save_dir: str = 'logs',
     name: Optional[str] = None,
     version: Optional[str] = None,
@@ -52,7 +52,8 @@ def main(
     ckpt_path: Optional[str] = None,
 ):
     import lightning as L
-    from lightning.pytorch.callbacks import (LearningRateMonitor,
+    from lightning.pytorch.callbacks import (EarlyStopping,
+                                             LearningRateMonitor,
                                              ModelCheckpoint)
     from lightning.pytorch.loggers import WandbLogger
     from lightning.pytorch.plugins.environments import SLURMEnvironment
@@ -108,12 +109,14 @@ def main(
         plugins=[SLURMEnvironment(auto_requeue=False)],
         callbacks=[
             LearningRateMonitor(),
+            EarlyStopping(monitor='Perplexity/Val'),
             ModelCheckpoint(
                 monitor='epoch',
                 mode='max',
                 filename='e{epoch}',
                 auto_insert_metric_name=False,
                 save_on_train_epoch_end=True,
+                save_top_k=-1
             ),
             ModelCheckpoint(
                 monitor='Perplexity/Val',

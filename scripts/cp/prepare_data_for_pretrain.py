@@ -4,16 +4,20 @@ from typing import Dict, List, Optional, Union
 
 import fire
 from datasets import (Dataset, concatenate_datasets, disable_caching,
-                      load_dataset)
+                      load_dataset, logging)
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
 
 def load_datasets(data_dir: Union[str, Path]) -> Dataset:
+    logging.disable_progress_bar()
+    logging.set_verbosity_error()
     data_dir = Path(data_dir)
     datasets = []
-    for p in data_dir.glob('*'):
+    for p in data_dir.glob('*/*.jsonl'):
         x = load_dataset('json', data_files=str(p))['train']
         datasets.append(x)
+    logging.set_verbosity_info()
+    logging.enable_progress_bar()
     return concatenate_datasets(datasets)
 
 def tokenize(batch: List[str], tokenizer: PreTrainedTokenizerFast):
@@ -55,14 +59,14 @@ def main(
     max_length: int,
     output_path: str,
     num_proc: Optional[int] = 4,
-    test_size: Union[int, float] = 10000,
+    test_size: Union[int, float] = 0.1,
 ):
     num_proc = num_proc or os.cpu_count()
 
     disable_caching()
 
     dataset = load_datasets(data_dir)
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=True)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=False)
 
     dataset = dataset.map(
         tokenize,
@@ -70,6 +74,7 @@ def main(
         input_columns='text',
         remove_columns=dataset.column_names,
         batched=True,
+        num_proc=num_proc
     )
 
     dataset = dataset.map(

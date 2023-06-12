@@ -1,9 +1,23 @@
 
 import os
 from inspect import signature
+from typing import Dict
 
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
+from torch import Tensor, nn
+from torch.nn.modules.module import _IncompatibleKeys
+
+
+def _state_dict_hook(module: nn.Module, state_dict: Dict[str, Tensor], prefix: str, local_metadata):
+    trainables = set(n for n, p in module.named_parameters() if p.requires_grad)
+    for k in list(state_dict.keys()):
+        if k not in trainables:
+            state_dict.pop(k)
+
+def _load_state_dict_post_hook(module: nn.Module, incompatible_keys: _IncompatibleKeys):
+    missing_keys = set(incompatible_keys.missing_keys) & set(n for n, p in module.named_parameters() if p.requires_grad)
+    incompatible_keys.missing_keys[:] = list(missing_keys)
 
 
 class LightningModuleX(L.LightningModule):
@@ -20,6 +34,12 @@ class LightningModuleX(L.LightningModule):
     @property
     def strategy(self):
         return self.trainer.strategy
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+        self._register_state_dict_hook(_state_dict_hook)
+        self.register_load_state_dict_post_hook(_load_state_dict_post_hook)
 
     def __init_subclass__(cls) -> None:
         __init__ = cls.__init__

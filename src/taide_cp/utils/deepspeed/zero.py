@@ -96,7 +96,7 @@ def parse_model_state(file):
 
     ds_version = state_dict.get(DS_VERSION, None)
 
-    return buffers, param_shapes, ds_version
+    return buffers, param_shapes, ds_version, state_dict['hyper_parameters']
 
 
 def parse_optim_states(files, ds_checkpoint_dir):
@@ -168,7 +168,7 @@ def _get_state_dict_from_zero_checkpoint(ds_checkpoint_dir, dtype):
         f"Detected checkpoint of type zero stage {zero_stage}, world_size: {world_size}")
 
     model_file = get_model_state_file(ds_checkpoint_dir, zero_stage)
-    buffers, param_shapes, ds_version = parse_model_state(model_file)
+    buffers, param_shapes, ds_version, hyper_parameters = parse_model_state(model_file)
     print(f'Parsing checkpoint created by deepspeed=={ds_version}')
 
     if zero_stage == 2:
@@ -178,7 +178,7 @@ def _get_state_dict_from_zero_checkpoint(ds_checkpoint_dir, dtype):
             fp32_flat_groups,
             buffers,
             dtype,
-        )
+        ), hyper_parameters
     elif zero_stage == 3:
         return _get_state_dict_from_zero3_checkpoint(
             world_size,
@@ -186,7 +186,7 @@ def _get_state_dict_from_zero_checkpoint(ds_checkpoint_dir, dtype):
             fp32_flat_groups,
             buffers,
             dtype,
-        )
+        ), hyper_parameters
 
 
 def _get_state_dict_from_zero2_checkpoint(
