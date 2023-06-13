@@ -125,6 +125,7 @@ def main(
                 filename='s{step}',
             )
         ],
+        min_epochs=1,
         max_epochs=max_epochs,
         max_steps=max_steps,
         val_check_interval=val_check_interval,
