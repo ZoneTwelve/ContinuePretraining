@@ -7,6 +7,7 @@ from .lightning_module_for_pre_training import LightningModuleForPreTraining
 
 
 class LLaMALightningModuleForPreTraining(LightningModuleForPreTraining):
+    name = 'llama'
     model_class = LlamaForCausalLM
     ds_model_class = DeepSpeedLlamaForCausalLM
     config_class = LlamaConfig
