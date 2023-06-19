@@ -27,6 +27,10 @@ def _load_state_dict_pre_hook(module: "PartiallyFrozenLinear", state_dict: Dict[
 
 
 class PartiallyFrozenLinear(nn.Module):
+    @property
+    def weight(self):
+        return torch.cat([self.w1, self.w2], dim=0)
+
     def __init__(self, linear: nn.Linear, pivot: int) -> None:
         super().__init__()
 

@@ -1,2 +1,2 @@
-from .pretrain_datacollator import PretrainDataCollator
-from .pretrain_datamodule import PretrainDataModule
+from .pretrain_datacollator import DataCollatorForPreTraining
+from .pretrain_datamodule import DataModuleForPreTraining

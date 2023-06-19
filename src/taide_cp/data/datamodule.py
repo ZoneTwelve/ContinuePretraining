@@ -59,10 +59,11 @@ class LightningDataModuleX(L.LightningDataModule, ABC):
         )
 
     def val_dataloader(self):
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.batch_size_val,
-            pin_memory=self.pin_memory,
-            num_workers=self.num_workers,
-            collate_fn=self.datacollator,
-        )
+        if self.val_dataset:
+            return DataLoader(
+                self.val_dataset,
+                batch_size=self.batch_size_val,
+                pin_memory=self.pin_memory,
+                num_workers=self.num_workers,
+                collate_fn=self.datacollator,
+            )

@@ -1,13 +1,10 @@
-
-
-from typing import Dict, List
-
 import torch
 from transformers import PreTrainedTokenizerBase
 
-from ...utils.data import DataCollator
+from ..datacollator import DataCollator
 
-class PretrainDataCollator(DataCollator):
+
+class DataCollatorForPreTraining(DataCollator):
     def __init__(self, tokenizer: PreTrainedTokenizerBase) -> None:
         super().__init__(tokenizer)
 

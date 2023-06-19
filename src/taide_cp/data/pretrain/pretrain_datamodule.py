@@ -1,6 +1,6 @@
-from ...utils.data import LightningDataModuleX
-from .pretrain_datacollator import PretrainDataCollator
+from ..datamodule import LightningDataModuleX
+from .pretrain_datacollator import DataCollatorForPreTraining
 
 
-class PretrainDataModule(LightningDataModuleX):
-    datacollator_cls = PretrainDataCollator
+class DataModuleForPreTraining(LightningDataModuleX):
+    datacollator_cls = DataCollatorForPreTraining

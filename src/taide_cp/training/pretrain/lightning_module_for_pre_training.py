@@ -1,5 +1,6 @@
+from abc import ABC, abstractstaticmethod
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Tuple, Type, TypedDict
+from typing import Literal, Optional, Tuple, Type, TypedDict
 
 import torch
 from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
@@ -12,8 +13,9 @@ from transformers.modeling_utils import no_init_weights
 from ...lightning import DeepSpeedStrategy
 from ...metrics import Perplexity
 from ...utils import ContextManagers
-from ...utils.training import (LightningModuleX, PartiallyFrozenEmbedding,
-                               PartiallyFrozenLinear, get_lr_scheduler)
+from ..layers import PartiallyFrozenEmbedding, PartiallyFrozenLinear
+from ..lightning_module import LightningModuleX
+from ..lr_schedulers import get_lr_scheduler
 
 
 class _BatchType(TypedDict):
@@ -59,11 +61,15 @@ def extend_tokens(
         tie_partially_frozen_weights(model)
 
 
-class LightningModuleForPreTraining(LightningModuleX):
+class LightningModuleForPreTraining(LightningModuleX, ABC):
+    @property
+    @abstractstaticmethod
+    def name() -> str: ...
+
     model_class: Type[PreTrainedModel]
     ds_model_class: Type[PreTrainedModel]
     config_class: Type[PretrainedConfig]
-    tokenizer_class: Type[PreTrainedTokenizerBase]
+    tokenizer_class: Type[PreTrainedTokenizerBase]    
 
     def __init__(
         self,
@@ -79,7 +85,7 @@ class LightningModuleForPreTraining(LightningModuleX):
         num_warmup_steps: int = 0,
         min_lr_factor: float = 0.1,
         _load_from_checkpoint: bool = False,
-    ) -> None:
+    ) -> None:       
         super().__init__()
 
         self.save_hyperparameters(ignore=['_load_from_checkpoint'])
@@ -109,7 +115,7 @@ class LightningModuleForPreTraining(LightningModuleX):
         self.train_perplexity = Perplexity(ignore_index=-100)
         self.val_perplexity = Perplexity(ignore_index=-100)
 
-    def configure_sharded_model(self) -> None:       
+    def configure_sharded_model(self) -> None:
         context_managers = []
         
         if self._load_from_checkpoint:
@@ -121,7 +127,7 @@ class LightningModuleForPreTraining(LightningModuleX):
             model_cls = self.ds_model_class or model_cls
 
         if not self._load_from_checkpoint:
-            self.model: PreTrainedModel = model_cls.from_pretrained(self.model_path)
+            self.model: PreTrainedModel = model_cls.from_pretrained(self.model_path, config=self.config)
         else:
             with ContextManagers(context_managers):
                 self.model = model_cls(self.config)
@@ -146,6 +152,8 @@ class LightningModuleForPreTraining(LightningModuleX):
                 self.freeze()
                 self.model.get_input_embeddings().requires_grad_(True)
                 self.model.get_output_embeddings().requires_grad_(True)
+        
+        assert False
 
     def configure_optimizers(self):
         optimizer_config = {}

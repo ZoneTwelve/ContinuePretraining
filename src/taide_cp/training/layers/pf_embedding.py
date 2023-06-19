@@ -18,6 +18,10 @@ def _load_state_dict_pre_hook(module: "PartiallyFrozenEmbedding", state_dict: Di
 
 
 class PartiallyFrozenEmbedding(nn.Module):
+    @property
+    def weight(self):
+        return torch.cat([self.w1, self.w2], dim=0)
+
     def __init__(
         self,
         embeddings: nn.Embedding,

@@ -4,14 +4,14 @@ from typing import Dict, List, Optional, Union
 
 import fire
 from datasets import (Dataset, concatenate_datasets, disable_caching,
-                      load_dataset, logging)
+                      load_dataset)
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
+from taide_cp.utils import DatasetsContextManager
 
+
+@DatasetsContextManager()
 def load_datasets(data_path: str) -> Dataset:
-    logging.disable_progress_bar()
-    logging.set_verbosity_error()
-
     datasets = []
     paths = []
     if os.path.isfile(data_path):
@@ -23,8 +23,6 @@ def load_datasets(data_path: str) -> Dataset:
         x = load_dataset('json', data_files=p)['train']
         datasets.append(x)
 
-    logging.set_verbosity_info()
-    logging.enable_progress_bar()
     return concatenate_datasets(datasets)
 
 def tokenize(batch: List[str], tokenizer: PreTrainedTokenizer):
@@ -65,7 +63,7 @@ def main(
     tokenizer_path: str,
     output_path: str,
     max_length: int = 2048,
-    num_proc: Optional[int] = 4,
+    num_proc: Optional[int] = None,
     test_size: Union[int, float] = 0.1,
 ):
     num_proc = num_proc or os.cpu_count()
@@ -73,15 +71,15 @@ def main(
     disable_caching()
 
     dataset = load_datasets(data_path)
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=False)
-
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=False, model_max_length=None)
+    
     dataset = dataset.map(
         tokenize,
         fn_kwargs=dict(tokenizer=tokenizer),
         input_columns='text',
         remove_columns=dataset.column_names,
         batched=True,
-        num_proc=num_proc
+        num_proc=num_proc,
     )
 
     dataset = dataset.map(

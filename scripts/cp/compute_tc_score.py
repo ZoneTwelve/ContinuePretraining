@@ -12,8 +12,8 @@ from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           GenerationConfig, PreTrainedModel,
                           PreTrainedTokenizerBase)
 
+from taide_cp.data import DataCollator
 from taide_cp.lightning import DeepSpeedStrategy
-from taide_cp.utils.data import DataCollator
 from tc_scorer.inference import TwCnStyleEvaluator
 
 

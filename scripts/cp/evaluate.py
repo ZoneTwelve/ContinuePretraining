@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 from transformers import (AutoModelForCausalLM, AutoTokenizer, PreTrainedModel,
                           PreTrainedTokenizerFast)
 
-from taide_cp.data import PretrainDataCollator
+from taide_cp.data import DataCollatorForPreTraining
 from taide_cp.metrics import Perplexity
 
 
@@ -96,7 +96,7 @@ def main(
     )
     dataset = dataset.select(range(1000))
         
-    dataloader = DataLoader(dataset, batch_size=batch_size, pin_memory=True, num_workers=4, collate_fn=PretrainDataCollator(tokenizer))
+    dataloader = DataLoader(dataset, batch_size=batch_size, pin_memory=True, num_workers=4, collate_fn=DataCollatorForPreTraining(tokenizer))
     perplexity = Perplexity(ignore_index=-100).to(model.device)
 
     pbar = tqdm(total=dataset.num_rows)
