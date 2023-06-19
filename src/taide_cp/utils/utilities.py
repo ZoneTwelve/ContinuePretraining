@@ -1,10 +1,16 @@
 import functools
 import json
 import logging
-from contextlib import ContextDecorator
-from typing import Any, Dict
+import os
+from contextlib import AbstractContextManager, ContextDecorator, ExitStack
+from typing import (Any, Callable, ContextManager, Dict, List, ParamSpec, Type,
+                    TypeVar, Union)
 
-__all__ = ['read_json', 'write_json', 'rgetattr', 'rsetattr', 'DatasetsContextManager']
+__all__ = ['read_json', 'write_json', 'rgetattr', 'rsetattr', 'DatasetsContextManager', 'ContextManagers', 'parse_ev', 'copy_callable_signature']
+
+T1 = TypeVar('T1')
+T2 = TypeVar('T2')
+P = ParamSpec('P')
 
 def read_json(path: str) -> Any:
     with open(path, 'r', encoding='utf-8') as f:
@@ -20,6 +26,19 @@ def rgetattr(obj: Any, attr: str):
 def rsetattr(obj: Any, attr: str, val: Any):
     pre, _, post = attr.rpartition('.')
     return setattr(rgetattr(obj, pre) if pre else obj, post, val)
+
+class ContextManagers(AbstractContextManager):
+    def __init__(self, context_managers: List[ContextManager]) -> None:
+        self.context_managers = context_managers
+        self.stack = ExitStack()
+
+    def __enter__(self):
+        for cm in self.context_managers:
+            self.stack.enter_context(cm)
+        return self
+    
+    def __exit__(self, __exc_type, __exc_value, __traceback):
+        self.stack.close()
 
 class DatasetsContextManager(ContextDecorator):
     @staticmethod
@@ -74,3 +93,19 @@ class DatasetsContextManager(ContextDecorator):
     
     def __exit__(self, __exc_type, __exc_value, __traceback):
         self.set_state(self.old_state)
+
+def parse_ev(type_: Type[T1], ev_name: str, default: T2 = None) -> Union[T1, T2]:
+    ev = os.environ.get(ev_name)
+    return type_(ev) if ev is not None else default
+
+
+def copy_callable_signature(
+    source: Callable[P, T1]
+) -> Callable[[Callable[..., T1]], Callable[P, T1]]:
+    def wrapper(target: Callable[..., T1]) -> Callable[P, T1]:
+        @functools.wraps(source)
+        def wrapped(*args: P.args, **kwargs: P.kwargs) -> T1:
+            return target(*args, **kwargs)
+        return wrapped
+    return wrapper
+
