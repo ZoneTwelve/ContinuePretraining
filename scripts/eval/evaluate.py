@@ -1,4 +1,3 @@
-import gc
 import os
 from glob import glob
 from typing import Optional
@@ -6,15 +5,15 @@ from typing import Optional
 import fire
 import lightning as L
 import torch
-import wandb
 from datasets import Dataset, concatenate_datasets, load_dataset
-from lightning.pytorch.loggers import WandbLogger
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+import taide_cp.models
 from taide_cp.data import DataCollatorForEvaluation
 from taide_cp.metrics import Perplexity
 from taide_cp.utils import DatasetsContextManager
+from taide_cp.utils.scripting import *
 
 
 def normalize_dataset(dataset: Dataset):
@@ -67,47 +66,35 @@ class LightningModuleForEvaluation(L.LightningModule):
         self.perplexity.update(x.loss, batch['labels'], by_loss=True)
         self.log('Perplexity/Test', self.perplexity, batch_size=batch['input_ids'].size(0), sync_dist=True)
 
-
-def evaluate(
-    ckpt_path: str,
+@entry_point(
+    get_wandb_logger
+)
+def main(
+    model_path: str | None = None,
+    ckpt_path: str | None = None,
     data_path: str = 'data/sft/raw',
-    project: str = 'taide_cp',
-    save_dir: str = 'logs',
-    name: Optional[str] = None,
-    version: Optional[str] = None,
     batch_size: int = 1,
     num_workers: int = 4,
+    **kwargs,
 ):
-    checkpoint = torch.load(ckpt_path, 'cpu')
-    model = LightningModuleForEvaluation(checkpoint['hyper_parameters']['model_path'])
-    model.load_state_dict(checkpoint['state_dict'], strict=False)
+    if model_path:
+        model = LightningModuleForEvaluation(model_path)
+    else:
+        checkpoint = torch.load(ckpt_path, 'cpu')
+        model = LightningModuleForEvaluation(checkpoint['hyper_parameters']['model_path'])
+        model.load_state_dict(checkpoint['state_dict'], strict=False)
+
     dataset = load_datasets(data_path)
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, collate_fn=DataCollatorForEvaluation(model.tokenizer))
     
     trainer = L.Trainer(
         num_nodes=int(os.environ.get('SLURM_NNODES', '0')) or 'auto',
-        logger=WandbLogger(
-            project=project,
-            save_dir=save_dir,
-            name=name,
-            version=version,
-        ),
+        logger=get_wandb_logger(**kwargs),
         enable_checkpointing=False,
     )
 
     trainer.test(model, dataloader)
     trainer.logger.experiment.finish()
-
-
-def main():
-    runs = wandb.Api().runs('hare1822/taide_cp', filters={'group': 'qode', 'tags': {'$nin': ['cp']}})
-    for run in runs:
-        ckpt_path = os.path.join('logs/taide_cp', run.id, 'checkpoints/e0.ckpt')
-        evaluate(
-            ckpt_path=ckpt_path,
-            version=run.id,
-        )
-        gc.collect()
 
 if __name__ == '__main__':
     fire.Fire(main)
