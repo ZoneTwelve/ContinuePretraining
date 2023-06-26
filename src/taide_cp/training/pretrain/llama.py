@@ -13,6 +13,6 @@ class LLaMALightningModuleForPreTraining(LightningModuleForPreTraining):
     config_class = LlamaConfig
     tokenizer_class = LlamaTokenizer
 
-    def __postinit__(self) -> None:
+    def on_after_init(self) -> None:
         if self.tokenizer.pad_token is None:
             self.tokenizer.add_special_tokens({'pad_token': self.tokenizer.bos_token})
