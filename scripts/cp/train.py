@@ -1,9 +1,8 @@
-import os
 from typing import Optional
 
 import fire
 
-from taide_cp.utils import parse_ev
+from taide_cp.utils import SLURM
 from taide_cp.utils.scripting import *
 
 
@@ -71,12 +70,12 @@ def main(
         'seed': seed,
     }
 
-    if 'SLURM_JOB_ID' in os.environ:
+    if SLURM.is_slurm:
         extra_hyperparameters_to_save['slurm'] = {
-            'job_id': parse_ev(str, 'SLURM_JOB_ID'),
-            'job_name': parse_ev(str, 'SLURM_JOB_NAME'),
-            'num_nodes': parse_ev(int, 'SLURM_JOB_NUM_NODES'),
-            'num_gpus': parse_ev(int, 'SLURM_NTASKS'),
+            'job_id': SLURM.job_id,
+            'job_name': SLURM.job_name,
+            'num_nodes': SLURM.num_nodes,
+            'num_gpus': SLURM.num_tasks,
         }
     
     model.save_hyperparameters(extra_hyperparameters_to_save)

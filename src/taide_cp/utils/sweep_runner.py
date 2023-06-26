@@ -10,7 +10,7 @@ import flask
 import requests
 import wandb
 
-from ..utils.slurm import get_host, get_port, global_rank, world_size
+from .slurm import SLURM
 
 __all__ = ['SweepRunner', 'SweepRunnerState']
 
@@ -29,10 +29,10 @@ class SweepRunner:
         return f'http://{self.host}:{self.port}'
 
     def __init__(self, host: Optional[str] = None, port: Optional[int] = None, port_offset: int = 10000) -> None:
-        self.host = host or get_host()
-        self.port = port or get_port(port_offset)
+        self.host = host or SLURM.get_host()
+        self.port = port or SLURM.get_port(port_offset)
 
-        if global_rank() == 0:
+        if SLURM.global_rank == 0:
             logging.getLogger('werkzeug').disabled = True
             self.create_server()
 
@@ -63,11 +63,11 @@ class SweepRunner:
             c = s.connect_ex((self.host, self.port))
     
     def wait_for_clients(self):
-        while len(self.ready_clients) < world_size():
+        while len(self.ready_clients) < SLURM.num_tasks:
             time.sleep(1)
     
     def set_ready(self):
-        requests.post(f'{self.address}/set_ready', json=dict(global_rank=global_rank()))
+        requests.post(f'{self.address}/set_ready', json=dict(global_rank=SLURM.global_rank))
 
     def sync_state(self):
         state = requests.get(f'{self.address}').json()
@@ -87,7 +87,7 @@ class SweepRunner:
         function(**self.config)
 
     def run(self, sweep_id: int, function: Callable[..., None], count: Optional[int] = None):
-        if global_rank() == 0:
+        if SLURM.global_rank == 0:
             wandb.agent(sweep_id, function=partial(self.agent_function, function), count=count)
             self.state = SweepRunnerState.FINISHED
         else:

@@ -60,6 +60,15 @@ class DatasetsContextManager(ContextDecorator):
             datasets.disable_progress_bar()
 
     @classmethod
+    def get_state(cls):
+        import datasets
+        return {
+            'caching': datasets.is_caching_enabled(),
+            'progress_bar': datasets.is_progress_bar_enabled(),
+            'verbosity': datasets.logging.get_verbosity(),
+        }
+
+    @classmethod
     def set_state(cls, state: Dict[str, Any]):
         import datasets
         cls.set_caching_enabled(state['caching'])
@@ -74,14 +83,7 @@ class DatasetsContextManager(ContextDecorator):
     ) -> None:
         super().__init__()
 
-        import datasets
-        
-        self.old_state = {
-            'caching': datasets.is_caching_enabled(),
-            'progress_bar': datasets.is_progress_bar_enabled(),
-            'verbosity': datasets.logging.get_verbosity(),
-        }
-
+        self.old_state = None
         self.new_state = {
             'caching': caching,
             'progress_bar': progress_bar,
@@ -89,6 +91,7 @@ class DatasetsContextManager(ContextDecorator):
         }
     
     def __enter__(self):
+        self.old_state = self.get_state()
         self.set_state(self.new_state)
     
     def __exit__(self, __exc_type, __exc_value, __traceback):

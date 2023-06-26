@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Union
 
 import fire
 from datasets import (Dataset, concatenate_datasets, disable_caching,
-                      load_dataset)
+                      is_caching_enabled, load_dataset)
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
 from taide_cp.utils import DatasetsContextManager
@@ -67,7 +67,7 @@ def main(
     test_size: Union[int, float] = 0.1,
 ):
     num_proc = num_proc or os.cpu_count()
-
+    
     disable_caching()
 
     dataset = load_datasets(data_path)

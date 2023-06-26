@@ -1,4 +1,3 @@
-import os
 import re
 from typing import *
 
@@ -10,7 +9,7 @@ if TYPE_CHECKING:
     from lightning.pytorch.strategies import Strategy
     from transformers import PreTrainedTokenizer
 
-from ..utilities import parse_ev
+from ..slurm import SLURM
 from .decorators import component
 
 __all__ = ['get_model_for_pre_training', 'get_strategy', 'get_datamodule_for_pre_training', 'get_wandb_logger', 'get_trainer']
@@ -125,10 +124,10 @@ def get_trainer(
     from lightning import Trainer
     from lightning.pytorch.plugins.environments import SLURMEnvironment
 
-    num_nodes = num_nodes or parse_ev(int, 'SLURM_NNODES', 1)
+    num_nodes = num_nodes or SLURM.num_nodes or 1
 
     plugins = plugins or []
-    if os.environ.get('SLURM_JOB_ID') is not None:
+    if SLURM.is_slurm:
         plugins += [SLURMEnvironment(auto_requeue=False)]
 
     return Trainer(
