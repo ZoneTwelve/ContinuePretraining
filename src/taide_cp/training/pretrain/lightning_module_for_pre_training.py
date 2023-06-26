@@ -153,8 +153,6 @@ class LightningModuleForPreTraining(LightningModuleX, ABC):
                 self.model.get_input_embeddings().requires_grad_(True)
                 self.model.get_output_embeddings().requires_grad_(True)
         
-        assert False
-
     def configure_optimizers(self):
         optimizer_config = {}
         parameters = [p for p in self.parameters() if p.requires_grad]
