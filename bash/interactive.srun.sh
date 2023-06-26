@@ -6,6 +6,11 @@ PARTITOIN="gpNCHC_LLM"
 NODELIST=
 JOB_NAME="interactive.srun.sh"
 
+if [ $1 ]
+then
+    GPUS=$1
+fi
+
 if [ $TIME ]
 then
     TIME="--time=$TIME"
