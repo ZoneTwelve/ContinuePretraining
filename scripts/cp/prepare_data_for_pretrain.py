@@ -4,9 +4,10 @@ from typing import Dict, List, Optional, Union
 
 import fire
 from datasets import (Dataset, concatenate_datasets, disable_caching,
-                      is_caching_enabled, load_dataset)
-from transformers import AutoTokenizer, PreTrainedTokenizer
+                      load_dataset)
+from transformers import PreTrainedTokenizer
 
+from taide_cp.models import AutoTokenizer
 from taide_cp.utils import DatasetsContextManager
 
 
@@ -71,7 +72,7 @@ def main(
     disable_caching()
 
     dataset = load_datasets(data_path)
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=False, model_max_length=None)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, model_max_length=None)
     
     dataset = dataset.map(
         tokenize,

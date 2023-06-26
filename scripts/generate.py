@@ -6,16 +6,11 @@ from typing import Any, Optional, cast
 import fire
 import torch
 from accelerate import init_empty_weights
-from transformers import (AutoConfig, AutoModelForCausalLM, AutoTokenizer,
-                          GenerationConfig, PreTrainedModel)
+from transformers import GenerationConfig, PreTrainedModel
 
+from taide_cp.models import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+from taide_cp.utils import rsetattr
 
-def rgetattr(obj: Any, attr: str):
-    return functools.reduce(getattr, [obj] + attr.split('.'))
-
-def rsetattr(obj: Any, attr: str, val: Any):
-    pre, _, post = attr.rpartition('.')
-    return setattr(rgetattr(obj, pre) if pre else obj, post, val)
 
 def load_checkpoint(model: PreTrainedModel, checkpoint_path: str, device: torch.device):
     state_dict = torch.load(checkpoint_path, device)
@@ -40,11 +35,14 @@ def main(
     device: str = 'cuda'
 ):
     device = torch.device(device)
-    tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
-    # tokenizer.add_special_tokens({'pad_token': tokenizer.bos_token})
+    tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side='left')
+
+    if 'pad_token' not in tokenizer.special_tokens_map:
+        tokenizer.add_special_tokens({'[PAD]': tokenizer.bos_token})
 
     if checkpoint_path is None:
-        model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype='auto', low_cpu_mem_usage=True)
+        config = AutoConfig.from_pretrained(model_path)
+        model = AutoModelForCausalLM.from_pretrained(model_path, config=config, device_map=device, torch_dtype='auto', low_cpu_mem_usage=True)
         model = cast(PreTrainedModel, model)
     else:
         config = AutoConfig.from_pretrained(model_path)
@@ -79,15 +77,18 @@ def main(
         num_beams=4,
         temperature=0.1,
         top_p=0.1,
+        pad_token_id=tokenizer.pad_token_id,
+        eos_token_id=tokenizer.eos_token_id,
     )
 
-    output_text = []
-    for batch in chunk(prompts, batch_size):
-        x = tokenizer(batch, return_tensors='pt', padding=True, return_token_type_ids=False).to(model.device)
-        l = x['input_ids'].size(1)
-        x = model.generate(**x, generation_config=generation_config)
-        x = tokenizer.batch_decode(x[:, l:], skip_special_tokens=True, clean_up_tokenization_spaces=True)
-        output_text += x
+    with torch.autocast('cuda', dtype=model.dtype):
+        output_text = []
+        for batch in chunk(prompts, batch_size):
+            x = tokenizer(batch, return_tensors='pt', padding=True, return_token_type_ids=False).to(model.device)
+            l = x['input_ids'].size(1)
+            x = model.generate(**x, generation_config=generation_config)
+            x = tokenizer.batch_decode(x[:, l:], skip_special_tokens=True, clean_up_tokenization_spaces=True)
+            output_text += x
 
     for p, o in zip(prompts, output_text):
         print(p, end=' ||| ')

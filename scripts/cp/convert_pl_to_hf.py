@@ -4,9 +4,9 @@ from typing import Dict, Optional, cast
 import fire
 import torch
 from accelerate import init_empty_weights
-from transformers import (AutoConfig, AutoModelForCausalLM, AutoTokenizer,
-                          PreTrainedModel)
+from transformers import PreTrainedModel
 
+from taide_cp.models import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 from taide_cp.utils import rsetattr
 from taide_cp.utils.deepspeed import \
     get_lightning_checkpoint_from_zero_checkpoint
@@ -58,20 +58,19 @@ def main(
     model_path = model_path or hyper_parameters['model_path']
     tokenizer_path = tokenizer_path or hyper_parameters['tokenizer_path'] or model_path
 
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
     config = AutoConfig.from_pretrained(model_path)
     with init_empty_weights():
         model = AutoModelForCausalLM.from_config(config)
     model = cast(PreTrainedModel, model)
 
     if hyper_parameters['extend_tokens']:
-        model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype='auto', low_cpu_mem_usage=True)
+        model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype='auto', low_cpu_mem_usage=True, config=config)
         model = cast(PreTrainedModel, model)
         state_dict = patch_partial_embeddings(model, state_dict)
         model.resize_token_embeddings(len(tokenizer))
 
     model = load_state_dict(model, state_dict)
-    
     model.save_pretrained(output_path, max_shard_size='1000GB', safe_serialization=True)
     tokenizer.save_pretrained(output_path)
 

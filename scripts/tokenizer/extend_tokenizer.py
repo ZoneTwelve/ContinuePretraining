@@ -1,8 +1,8 @@
 from typing import Optional
 
 import fire
-from transformers import AutoTokenizer
 
+from taide_cp.models import AutoTokenizer
 from taide_cp.utils import read_json
 
 

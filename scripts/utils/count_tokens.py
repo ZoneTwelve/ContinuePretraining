@@ -1,12 +1,13 @@
 import os
 from glob import glob
-from typing import Dict, List, Optional, Union
+from typing import List, Optional
 
 import fire
 from datasets import (Dataset, concatenate_datasets, disable_caching,
                       load_dataset)
-from transformers import AutoTokenizer, PreTrainedTokenizer
+from transformers import PreTrainedTokenizer
 
+from taide_cp.models import AutoTokenizer, PreTrainedTokenizer
 from taide_cp.utils import DatasetsContextManager
 
 
@@ -38,15 +39,7 @@ def main(
     disable_caching()
 
     dataset = load_datasets(data_path)
-    tokenizer_init_kwargs = dict(
-        use_fast=False,
-        model_max_length=None,
-    )
-    try:
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_init_kwargs)
-    except ValueError:
-        tokenizer_init_kwargs['use_fast'] = True
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_init_kwargs)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, model_max_length=None)
 
     dataset = dataset.map(
         tokenize,
