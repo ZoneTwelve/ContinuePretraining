@@ -48,9 +48,9 @@ class AutoModelForCausalLM(AutoModelForCausalLM):
             from ..models.mpt import MPTForCausalLM
 
             kwargs.pop('trust_remote_code', None)
-            return MPTForCausalLM.from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+            return MPTForCausalLM.from_pretrained(pretrained_model_name_or_path, config=config, *model_args, **kwargs)
 
-        return super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+        return super().from_pretrained(pretrained_model_name_or_path, config=config, *model_args, **kwargs)
     
 
 class AutoTokenizer(AutoTokenizer):
