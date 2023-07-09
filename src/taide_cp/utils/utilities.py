@@ -2,11 +2,23 @@ import functools
 import json
 import logging
 import os
-from contextlib import AbstractContextManager, ContextDecorator, ExitStack
+from contextlib import AbstractContextManager, ContextDecorator, ExitStack, contextmanager
+import sys
 from typing import (Any, Callable, ContextManager, Dict, List, ParamSpec, Type,
                     TypeVar, Union)
 
-__all__ = ['read_json', 'write_json', 'rgetattr', 'rsetattr', 'DatasetsContextManager', 'ContextManagers', 'parse_ev', 'copy_callable_signature']
+__all__ = [
+    'read_json',
+    'write_json',
+    'rgetattr',
+    'rsetattr',
+    'DatasetsContextManager',
+    'ContextManagers',
+    'parse_ev',
+    'copy_callable_signature',
+    'cpu_count',
+    'disable_output',
+]
 
 T1 = TypeVar('T1')
 T2 = TypeVar('T2')
@@ -112,3 +124,17 @@ def copy_callable_signature(
         return wrapped
     return wrapper
 
+def cpu_count() -> int:
+    try:
+        import subprocess
+        return int(subprocess.run('nproc', stdout=subprocess.PIPE).stdout)
+    except FileNotFoundError:
+        import psutil
+        return psutil.cpu_count(logical=False)
+
+@contextmanager
+def disable_output():
+    sys.stdout = open(os.devnull, 'w')
+    yield
+    sys.stdout.close()
+    sys.stdout = sys.__stdout__
