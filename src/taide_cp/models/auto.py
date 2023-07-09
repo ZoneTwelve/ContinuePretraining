@@ -36,6 +36,7 @@ class AutoModelForCausalLM(AutoModelForCausalLM):
         config = kwargs.pop('config', None)
         trust_remote_code = kwargs.pop('trust_remote_code', None)
 
+        org_config = config
         if not isinstance(config, PretrainedConfig):
             config, kwargs = AutoConfig.from_pretrained(
                 pretrained_model_name_or_path,
@@ -50,7 +51,7 @@ class AutoModelForCausalLM(AutoModelForCausalLM):
             kwargs.pop('trust_remote_code', None)
             return MPTForCausalLM.from_pretrained(pretrained_model_name_or_path, config=config, *model_args, **kwargs)
 
-        return super().from_pretrained(pretrained_model_name_or_path, config=config, *model_args, **kwargs)
+        return super().from_pretrained(pretrained_model_name_or_path, config=org_config, *model_args, **kwargs)
     
 
 class AutoTokenizer(AutoTokenizer):
