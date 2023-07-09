@@ -1,69 +1,236 @@
-from abc import ABC
-from typing import Optional, Type
+import os
+import random
+import shutil
+import string
+from tempfile import gettempdir, mkdtemp
+from typing import Any, Dict, Literal, Mapping, Optional, Type, Union
 
 import lightning as L
-from datasets import load_from_disk
+from datasets import (Dataset, DatasetDict, get_dataset_config_info,
+                      load_dataset, load_from_disk)
+from datasets.config import HF_DATASETS_CACHE
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerBase
 
+from ..utils import SLURM, DatasetsContextManager, cpu_count
 from .datacollator import DataCollator
 
+StageType = Literal['fit', 'validate', 'test', 'predict']
+SplitType = Literal['train', 'val', 'test', 'pred']
 
-class LightningDataModuleX(L.LightningDataModule, ABC):
+STAGE2SPLIT: Mapping[StageType, SplitType] = {
+    'fit': 'train',
+    'validate': 'val',
+    'test': 'test',
+    'predict': 'pred',
+}
+
+class LightningDataModuleX(L.LightningDataModule):
     datacollator_cls: Optional[Type[DataCollator]] = None
     datacollator: Optional[DataCollator] = None
-
-    @property
-    def train_dataset(self):
-        return self.dataset['train']
-    
-    @property
-    def val_dataset(self):
-        return self.dataset['test']
+    default_split: SplitType = 'train'
 
     def __init__(
         self,
-        dataset_path: str,
         tokenizer: PreTrainedTokenizerBase,
-        batch_size: int = 1,
-        batch_size_val: Optional[int] = None,
+        *,
+        data_path: Optional[str] = None,
+        dataset_path: Optional[str] = None,
+        train_batch_size: int = 1,
+        val_batch_size: Optional[int] = None,
+        test_batch_size: Optional[int] = None,
+        pred_batch_size: Optional[int] = None,
+        train_split_size: Optional[Union[int, float]] = None,
+        val_split_size: Optional[Union[int, float]] = None,
+        test_split_size: Optional[Union[int, float]] = None,
+        pred_split_size: Optional[Union[int, float]] = None,
+        split_seed: Optional[int] = 42,
         num_workers: int = 1,
         pin_memory: bool = True,
-        datacollator_kwargs: Optional[dict] = None,
+        num_proc: Optional[int] = None,
+        datacollator_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__()
 
+        self.dataset = DatasetDict()
+        self.cleanup_dataset_path = False
+        
+        self.data_path = data_path
         self.dataset_path = dataset_path
         self.tokenizer = tokenizer
-
-        self.batch_size = batch_size
-        self.batch_size_val = batch_size_val or batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
+        self.num_proc = num_proc or cpu_count()
+
+        self.split_size: Dict[SplitType, Union[None, int, float]] = {
+            'train': None,
+            'val': None,
+            'test': None,
+            'pred': None
+        }
+        self.set_split_size(train_split_size, val_split_size, test_split_size, pred_split_size)
+        self.split_seed = split_seed
+
+        self.batch_size: Dict[SplitType, int] = {
+            'train': None,
+            'val': None,
+            'test': None,
+            'pred': None
+        }
+        self.set_batch_size(train_batch_size, val_batch_size, test_batch_size, pred_batch_size)
+
+        if dataset_path is None:
+            self.cleanup_dataset_path = True
+
+            if SLURM.is_slurm:
+                r = random.Random(SLURM.job_id)
+                name = ''.join(r.choice(string.ascii_lowercase) for _ in range(8))
+                self.dataset_path = os.path.join(gettempdir(), 'tmp' + name)
+            else:
+                self.dataset_path = mkdtemp()
 
         if self.datacollator_cls is not None:
             datacollator_kwargs = datacollator_kwargs or {}
             self.datacollator = self.datacollator_cls(tokenizer, **datacollator_kwargs)
 
-    def setup(self, stage: Optional[str] = None) -> None:
-        self.dataset = load_from_disk(self.dataset_path)
+    def set_batch_size(
+        self,
+        train: Optional[int] = None,
+        val: Optional[int] = None,
+        test: Optional[int] = None,
+        pred: Optional[int] = None,
+    ):
+        self.batch_size['train'] = train or self.batch_size['train']
+        self.batch_size['val'] = val or self.batch_size['val'] or train
+        self.batch_size['test'] = test or self.batch_size['test'] or train
+        self.batch_size['pred'] = pred or self.batch_size['pred'] or train
+
+    def set_split_size(
+        self,
+        train: Optional[Union[int, float]] = None,
+        val: Optional[Union[int, float]] = None,
+        test: Optional[Union[int, float]] = None,
+        pred: Optional[Union[int, float]] = None,
+    ):            
+        self.split_size['train'] = train
+        self.split_size['val'] = val
+        self.split_size['test'] = test
+        self.split_size['pred'] = pred
+
+    @DatasetsContextManager()
+    def split(self, dataset: Dataset):
+        dataset_dict = DatasetDict()
+        dataset = dataset.shuffle(seed=self.split_seed)
+
+        size: Dict[SplitType, Union[None, int, float]] = {}
+        for sp, sz in self.split_size.items():
+            if isinstance(sz, float):
+                size[sp] = int(dataset.num_rows * sz)
+            else:
+                size[sp] = sz
+
+        if (
+            size['train'] is None
+            and size['val'] is None
+            and size['test'] is None
+            and size['pred'] is None
+        ):
+            dataset_dict[self.default_split] = dataset
+        elif (
+            size['train'] is None
+            and size['val'] is not None and size['val'] < dataset.num_rows
+            and size['test'] is None
+            and size['pred'] is None
+        ):
+            train_size = dataset.num_rows - size['val']
+            dataset_dict['train'] = dataset.select(range(train_size))
+            dataset_dict['val'] = dataset.select(range(train_size, dataset.num_rows))
+        else:
+            s = 0
+            for sp, sz in size.items():
+                if sz:
+                    e = s + sz
+                    dataset_dict[sp] = dataset.select(range(s, e))
+                    s = e
+
+        return dataset_dict
+    
+    def prepare_data(self) -> None:
+        if self.is_dataset(self.dataset_path):
+            return
+        
+        dataset = load_dataset(self.data_path)['train']
+        dataset = self.split(dataset)
+        dataset.save_to_disk(self.dataset_path)
+    
+    def setup(self, stage: Optional[StageType] = None) -> None:
+        if stage is None:
+            self.dataset = load_from_disk(self.dataset_path)
+        elif stage == 'fit':
+            self.dataset['train'] = load_from_disk(os.path.join(self.dataset_path, 'train'))
+            self.dataset['val'] = load_from_disk(os.path.join(self.dataset_path, 'val'))
+        else:
+            split = STAGE2SPLIT[stage]
+            self.dataset[split] = load_from_disk(os.path.join(self.dataset_path, split))
 
     def train_dataloader(self):
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            pin_memory=self.pin_memory,
-            num_workers=self.num_workers,
-            collate_fn=self.datacollator,
-            shuffle=True,
-        )
-
-    def val_dataloader(self):
-        if self.val_dataset:
+        if 'train' in self.dataset:
             return DataLoader(
-                self.val_dataset,
-                batch_size=self.batch_size_val,
+                self.dataset['train'],
+                batch_size=self.batch_size['train'],
                 pin_memory=self.pin_memory,
                 num_workers=self.num_workers,
                 collate_fn=self.datacollator,
+                shuffle=True,
             )
+        
+        return super().train_dataloader()
+
+    def val_dataloader(self):
+        if 'val' in self.dataset:
+            return DataLoader(
+                self.dataset['val'],
+                batch_size=self.batch_size['val'],
+                pin_memory=self.pin_memory,
+                num_workers=self.num_workers,
+                collate_fn=self.datacollator,
+                shuffle=False,
+            )
+        
+        return super().val_dataloader()
+        
+    def test_dataloader(self):
+        if 'test' in self.dataset:
+            return DataLoader(
+                self.dataset['test'],
+                batch_size=self.batch_size['test'],
+                pin_memory=self.pin_memory,
+                num_workers=self.num_workers,
+                collate_fn=self.datacollator,
+                shuffle=False,
+            )
+        return super().test_dataloader()
+    
+    def predict_dataloader(self):
+        if 'predict' in self.dataset:
+            return DataLoader(
+                self.dataset['predict'],
+                batch_size=self.batch_size['predict'],
+                pin_memory=self.pin_memory,
+                num_workers=self.num_workers,
+                collate_fn=self.datacollator,
+                shuffle=False,
+            )
+        return super().predict_dataloader()
+    
+    def teardown(self, stage: Optional[StageType] = None) -> None:
+        if self.cleanup_dataset_path:
+            shutil.rmtree(self.dataset_path, ignore_errors=True)
+
+    @staticmethod
+    def is_dataset(path: str):
+        try:
+            get_dataset_config_info(path)
+            return True
+        except FileNotFoundError:
+            return False

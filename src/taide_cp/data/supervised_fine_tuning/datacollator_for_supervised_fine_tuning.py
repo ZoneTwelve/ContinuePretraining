@@ -1,13 +1,9 @@
 import torch
-from transformers import PreTrainedTokenizerBase
 
 from ..datacollator import DataCollator
 
 
-class DataCollatorForEvaluation(DataCollator):
-    def __init__(self, tokenizer: PreTrainedTokenizerBase) -> None:
-        super().__init__(tokenizer)
-
+class DataCollatorForSupervisedFineTuning(DataCollator):
     def __call__(self, batch):
         batch = self.convert_list_of_dict_to_dict_of_list(batch)
         
