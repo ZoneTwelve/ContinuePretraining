@@ -1,8 +1,10 @@
+import inspect
 import re
 from typing import *
 
 if TYPE_CHECKING:
     from lightning.fabric.plugins.precision.precision import _PRECISION_INPUT
+    from lightning.fabric.utilities.types import _PATH
     from lightning.pytorch.callbacks import Callback
     from lightning.pytorch.loggers import Logger
     from lightning.pytorch.plugins import PLUGIN_INPUT
@@ -12,7 +14,14 @@ if TYPE_CHECKING:
 from ..slurm import SLURM
 from .decorators import component
 
-__all__ = ['get_model_for_pre_training', 'get_strategy', 'get_datamodule_for_pre_training', 'get_wandb_logger', 'get_trainer']
+__all__ = [
+    'get_model_for_pre_training',
+    'get_strategy',
+    'get_datamodule_for_pre_training',
+    'get_wandb_logger',
+    'get_logger',
+    'get_trainer'
+]
 
 
 @component()
@@ -23,6 +32,7 @@ def get_model_for_pre_training(
     extend_tokens: bool = False,
     initializing_strategy: Optional[str] = None,
     freezing_strategy: Optional[str] = None,
+    max_length: int = 2048,
     lr: float = 1e-4,
     betas: Tuple[float, float] = (0.9, 0.95),
     weight_decay: float = 1e-1,
@@ -40,6 +50,7 @@ def get_model_for_pre_training(
         extend_tokens=extend_tokens,
         initializing_strategy=initializing_strategy,
         freezing_strategy=freezing_strategy,
+        max_length=max_length,
         lr=lr,
         betas=betas,
         weight_decay=weight_decay,
@@ -50,21 +61,27 @@ def get_model_for_pre_training(
     )
 
 
-@component(ignored_keywords_on_entry_point=['tokenizer'])
+@component(ignored_keywords_on_entry_point=['tokenizer', 'sequence_length'])
 def get_datamodule_for_pre_training(
-    dataset_path: str,
     tokenizer: "PreTrainedTokenizer",
+    sequence_length: int,
+    data_path: str,
+    dataset_path: str,
     micro_batch_size: int = 1,
     micro_batch_size_val: Optional[int] = None,
+    val_split_size: Optional[Union[int, float]] = 0.1,
     num_workers: int = 4,
 ):
     from ...data import DataModuleForPreTraining
     
     return DataModuleForPreTraining(
-        dataset_path=dataset_path,
         tokenizer=tokenizer,
-        batch_size=micro_batch_size,
-        batch_size_val=micro_batch_size_val,
+        sequence_length=sequence_length,
+        data_path=data_path,
+        dataset_path=dataset_path,
+        train_batch_size=micro_batch_size,
+        val_batch_size=micro_batch_size_val,
+        val_split_size=val_split_size,
         num_workers=num_workers,
     )
 
@@ -93,6 +110,42 @@ def get_wandb_logger(
         job_type=job_type,
     )
 
+@component()
+def get_logger(
+    logger_type: Literal['csv', 'wandb'] = 'wandb',
+    save_dir: str = 'logs',
+    name: str | None = None,
+    version: str | None = None,
+    project: str = 'taide_cp',
+    tags: str | list[str] | None = None,
+    notes: str | None = None,
+    group: str | None = None,
+    job_type: str | None = None,
+):
+    from lightning.pytorch.loggers import CSVLogger, WandbLogger
+
+    if logger_type == 'csv':
+        name = inspect.signature(CSVLogger).parameters['name'].default if name is None else name
+        return CSVLogger(
+            save_dir=save_dir,
+            name=name,
+            version=version,
+        )
+    
+    elif logger_type == 'wandb':
+        tags = tags or []
+        tags = re.split(r',\s*', tags) if isinstance(tags, str) else tags
+        return WandbLogger(
+            name=name,
+            version=version,
+            save_dir=save_dir,
+            project=project,
+            tags=tags,
+            notes=notes,
+            group=group,
+            job_type=job_type,
+        )
+
 
 @component()
 def get_strategy(strategy: str = 'auto', **kwargs) -> Union[str, "Strategy"]:
@@ -120,14 +173,24 @@ def get_trainer(
     accumulate_grad_batches: int = 1,
     gradient_clip_val: Optional[Union[int, float]] = None,
     plugins: Optional[Union["PLUGIN_INPUT", List["PLUGIN_INPUT"]]] = None,
+    default_root_dir: Optional["_PATH"] = None,
 ):
     from lightning import Trainer
-    from lightning.pytorch.plugins.environments import SLURMEnvironment
+    from lightning.pytorch.callbacks import ProgressBar
 
     num_nodes = num_nodes or SLURM.num_nodes or 1
+    
+    callbacks = callbacks or []
+    for x in callbacks:
+        if isinstance(x, ProgressBar):
+            break
+    else:
+        from ...lightning import TQDMProgressBar
+        callbacks += [TQDMProgressBar()]
 
     plugins = plugins or []
     if SLURM.is_slurm:
+        from lightning.pytorch.plugins.environments import SLURMEnvironment
         plugins += [SLURMEnvironment(auto_requeue=False)]
 
     return Trainer(
@@ -147,4 +210,5 @@ def get_trainer(
         accumulate_grad_batches=accumulate_grad_batches,
         gradient_clip_val=gradient_clip_val,
         plugins=plugins,
+        default_root_dir=default_root_dir
     )

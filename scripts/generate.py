@@ -1,7 +1,6 @@
-import functools
 import json
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Optional, cast
 
 import fire
 import torch
@@ -38,7 +37,7 @@ def main(
     tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side='left')
 
     if 'pad_token' not in tokenizer.special_tokens_map:
-        tokenizer.add_special_tokens({'[PAD]': tokenizer.bos_token})
+        tokenizer.add_special_tokens({'pad_token': tokenizer.bos_token})
 
     if checkpoint_path is None:
         config = AutoConfig.from_pretrained(model_path)

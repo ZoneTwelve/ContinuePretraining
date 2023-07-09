@@ -7,8 +7,8 @@ from datasets import (Dataset, concatenate_datasets, disable_caching,
                       load_dataset)
 from transformers import PreTrainedTokenizer
 
-from taide_cp.models import AutoTokenizer, PreTrainedTokenizer
-from taide_cp.utils import DatasetsContextManager
+from taide_cp.models import AutoTokenizer
+from taide_cp.utils import DatasetsContextManager, cpu_count
 
 
 @DatasetsContextManager()
@@ -34,7 +34,7 @@ def main(
     tokenizer_path: str,
     num_proc: Optional[int] = None,
 ):
-    num_proc = num_proc or os.cpu_count()
+    num_proc = num_proc or cpu_count()
 
     disable_caching()
 

@@ -64,7 +64,7 @@ def main(
         model = AutoModelForCausalLM.from_config(config)
     model = cast(PreTrainedModel, model)
 
-    if hyper_parameters['extend_tokens']:
+    if hyper_parameters['extend_tokens'] and hyper_parameters['freezing_strategy'] is not None:
         model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype='auto', low_cpu_mem_usage=True, config=config)
         model = cast(PreTrainedModel, model)
         state_dict = patch_partial_embeddings(model, state_dict)

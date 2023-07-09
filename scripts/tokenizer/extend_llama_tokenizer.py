@@ -17,7 +17,7 @@ def add_token(spm, token: str):
 def main(
     tokenizer_path: str,
     output_path: str,
-    vocab_path: Optional[str],
+    vocab_path: Optional[str] = None,
     pad_token: Optional[str] = '<pad>',
 ):
     tokenizer: LlamaTokenizer = LlamaTokenizer.from_pretrained(tokenizer_path)
@@ -37,7 +37,13 @@ def main(
     with tempfile.NamedTemporaryFile() as f:
         f.write(spm.SerializeToString())
         f.flush()
-        tokenizer = LlamaTokenizer(f.name, pad_token=pad_token, padding_side='left')
+
+        kwargs = {
+            **tokenizer.init_kwargs,
+            'pad_token': '<pad>',
+            'padding_side': 'left',
+        }
+        tokenizer = LlamaTokenizer(f.name, **kwargs)
     
     tokenizer.save_pretrained(output_path)
 
