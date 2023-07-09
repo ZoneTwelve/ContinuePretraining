@@ -1,16 +1,18 @@
 from abc import ABC, abstractstaticmethod
+from functools import partial
 from pathlib import Path
-from typing import Literal, Optional, Tuple, Type, TypedDict
+from typing import Callable, Literal, Optional, Set, Tuple, Type, TypedDict
 
 import torch
 from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
 from torch import nn
+from torch.distributed.fsdp.wrap import wrap, transformer_auto_wrap_policy
 from torch.optim import AdamW
 from transformers import (PretrainedConfig, PreTrainedModel,
                           PreTrainedTokenizerBase)
 from transformers.modeling_utils import no_init_weights
 
-from ...lightning import DeepSpeedStrategy
+from ...lightning import DeepSpeedStrategy, FSDPStrategy
 from ...metrics import Perplexity
 from ...utils import ContextManagers
 from ..layers import PartiallyFrozenEmbedding, PartiallyFrozenLinear
@@ -66,10 +68,17 @@ class LightningModuleForPreTraining(LightningModuleX, ABC):
     @abstractstaticmethod
     def name() -> str: ...
 
-    model_class: Type[PreTrainedModel]
-    ds_model_class: Type[PreTrainedModel]
-    config_class: Type[PretrainedConfig]
-    tokenizer_class: Type[PreTrainedTokenizerBase]    
+    model_class: Optional[Type[PreTrainedModel]] = None
+    config_class: Optional[Type[PretrainedConfig]] = None
+    tokenizer_class: Optional[Type[PreTrainedTokenizerBase]] = None
+
+    # DeepSpeed
+    ds_model_class: Optional[Type[PreTrainedModel]] = None
+
+    # Fully Sharded Data Parallel
+    fsdp_auto_wrap_policy: Optional[Callable[[nn.Module, bool, int], bool]] = None
+    fsdp_param_init_fn: Optional[Callable[[nn.Module, bool, int], bool]] = None
+    fsdp_transformer_layer_cls: Optional[Set[Type[nn.Module]]] = None
 
     def __init__(
         self,
@@ -78,7 +87,9 @@ class LightningModuleForPreTraining(LightningModuleX, ABC):
         extend_tokens: bool = False,
         initializing_strategy: InitializingStrategy = None,
         freezing_strategy: FreezingStrategy = None,
+        max_length: int = 2048,
         lr: Optional[float] = 1e-5,
+        # optimizer: Literal['adamw', 'lion'] = 'adamw',
         betas: Optional[Tuple[float, float]] = (0.9, 0.95),
         weight_decay: Optional[float] = 1e-1,
         lr_scheduler_type: Literal[None, 'linear', 'cosine'] = None,
@@ -101,6 +112,8 @@ class LightningModuleForPreTraining(LightningModuleX, ABC):
         self.freezing_strategy = freezing_strategy
 
         assert self.extend_tokens or len(self.tokenizer) <= self.config.vocab_size
+
+        self.max_length = max_length
 
         self.lr = lr
         self.betas = betas
@@ -131,6 +144,15 @@ class LightningModuleForPreTraining(LightningModuleX, ABC):
         else:
             with ContextManagers(context_managers):
                 self.model = model_cls(self.config)
+
+        if isinstance(self.strategy, FSDPStrategy):
+            self.model = wrap(
+                self.model,
+                auto_wrap_policy=partial(
+                    transformer_auto_wrap_policy,
+                    transformer_layer_cls=self.fsdp_transformer_layer_cls
+                )
+            )
 
         if self.extend_tokens:           
             extend_tokens(
