@@ -10,15 +10,17 @@
 # export WANDB_MODE=disabled
 
 MODEL_TYPE=llama
-MODEL_PATH=checkpoints/llama-7b
-TOKENIZER_PATH=checkpoints/tokenizer/llama-cw
-DATASET_PATH=data/cp/tokenized/llama-cw/f
+MODEL_PATH=checkpoints/open_llama_7b
+TOKENIZER_PATH=checkpoints/tokenizer/open_llama-cw
+MAX_LENGTH=2048
+DATA_PATH=data/cp/group/g
+DATASET_PATH=data/cp/tokenized/open_llama-cw/g
 CKPT_PATH=None
 
 # WandB
-NAME="llama-7b-cw_stage1-f"
+NAME="open_llama_7b-cw_stage1-g"
 VERSION=""
-TAGS="llama:7b, cp, cp:stage1, tokenizer:cc, data:f"
+TAGS="open_llama:7b, cp, cp:stage1, tokenizer:open_llama-cw, data:g"
 NOTES=""
 
 # Stage1
@@ -46,6 +48,8 @@ TASK="
         --model_type=$MODEL_TYPE \
         --model_path=$MODEL_PATH \
         --tokenizer_path=$TOKENIZER_PATH \
+        --max_length=$MAX_LENGTH \
+        --data_path=$DATA_PATH \
         --dataset_path=$DATASET_PATH \
         --name=\"$NAME\" \
         --version=$VERSION \

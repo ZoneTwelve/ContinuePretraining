@@ -29,6 +29,7 @@ def main(
     model = get_model_for_pre_training(**kwargs)
     datamodule = get_datamodule_for_pre_training(
         tokenizer=model.tokenizer,
+        sequence_length=model.max_length,
         **kwargs
     )
 
@@ -38,7 +39,6 @@ def main(
             offload_optimizer=True,
             offload_parameters=True,
             pin_memory=True,
-            logging_batch_size_per_gpu=datamodule.batch_size,
         ),
         logger=get_wandb_logger(**kwargs),
         callbacks=[
@@ -63,7 +63,9 @@ def main(
     )
 
     extra_hyperparameters_to_save = {
-        'micro_batch_size': datamodule.batch_size,
+        'data_path': datamodule.data_path,
+        'dataset_path': datamodule.dataset_path,
+        'micro_batch_size': datamodule.batch_size['train'],
         'precision': trainer.precision,
         'accumulate_grad_batches': trainer.accumulate_grad_batches,
         'gradient_clip_val': trainer.gradient_clip_val,

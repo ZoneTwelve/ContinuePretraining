@@ -8,14 +8,19 @@
 
 export WANDB_MODE=disabled
 
-MODEL_PATH=checkpoints/llama-7b-cw_stage1-qode_base-e1_stage2-qode_base-s3822
-CKPT_PATH=None
+MODEL_PATH=
+DATA_PATH="data/sft/raw"
+NAME=""
+VERSION=""
+SAVE_DIR="logs/eval"
 
 TASK="
     python scripts/eval/evaluate.py \
         --model_path=$MODEL_PATH \
-        --ckpt_path=$CKPT_PATH \
-        --job_type=eval
+        --data_path=$DATA_PATH \
+        --name=$NAME \
+        --version=$VERSION \
+        --save_dir=$SAVE_DIR \
 "
 
 srun bash -c "$TASK"
