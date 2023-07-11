@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict
 
 from datasets import load_dataset
 from transformers import PreTrainedTokenizerBase
@@ -12,8 +12,15 @@ from .datacollator_for_multiple_choice_question import \
 
 
 def preprocess(x, i):
-    x['選項四'] = x['選項四'].removesuffix('。')
     x['id'] = i
+    x['question'] = x.pop('題目')
+    x['choices'] = [
+        x.pop('選項一'),
+        x.pop('選項二'),
+        x.pop('選項三'),
+        x.pop('選項四').removesuffix('。')
+    ]
+    x['answer'] = x.pop('正確答案') - 1
     return x
 
 class DataModuleForMultipleChoiceQuestion(LightningDataModuleX):

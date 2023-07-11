@@ -13,17 +13,19 @@ from taide_cp.utils.scripting import get_logger, get_trainer
 
 
 class LightningModuleForMultipleChoiceQuestion(LightningModuleX):
-    def __init__(self, model_path: str) -> None:
+    def __init__(self, model_path: str, normalize_by_uncond: bool) -> None:
         super().__init__()
 
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
             torch_dtype='auto',
-            low_cpu_mem_usage=True
+            low_cpu_mem_usage=True,
+            trust_remote_code=True
         )
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
-        self.example_input_ids = None
+        self.normalize_by_uncond = normalize_by_uncond
+
         self.example_past_kv = None
 
         self.total = 0
@@ -38,17 +40,22 @@ class LightningModuleForMultipleChoiceQuestion(LightningModuleX):
             self.example_past_kv = self.model(**batch['example_encoding'], use_cache=True).past_key_values
         
         probs = []
-        for question_choice_encoding, choice_target, choice_index, choice_index_padding_mask in zip(
-            batch['question_choice_encodings'],
-            batch['choice_targets'],
-            batch['choice_indices'],
-            batch['choice_index_padding_masks'],
-        ):
-            logits = self.model(**question_choice_encoding, past_key_values=self.example_past_kv, use_cache=False).logits
-            p = torch.log_softmax(logits, dim=-1)
-            p = p.gather(1, choice_index.unsqueeze(-1).repeat(1, 1, p.size(-1)))
-            p = p.gather(2, choice_target).masked_fill(choice_index_padding_mask.unsqueeze(-1), 0.0).squeeze()
-            p = p.sum(-1).div(choice_index_padding_mask.logical_not().count_nonzero(-1)).exp()
+        for question_choice_input, answer_input in zip(batch['question_choice_inputs'], batch['answer_inputs']):
+            p = self.model(**question_choice_input['encoding'], past_key_values=self.example_past_kv, use_cache=False).logits
+            p = torch.log_softmax(p, dim=-1)
+            p = p.gather(1, question_choice_input['choice_index'].unsqueeze(-1).repeat(1, 1, p.size(-1)))
+            p = p.gather(2, question_choice_input['choice_target'])
+            p = p.masked_fill(question_choice_input['choice_index_padding_mask'].unsqueeze(-1), 0.0).squeeze()
+            p = p.sum(-1).div(question_choice_input['choice_index_padding_mask'].logical_not().count_nonzero(-1)).exp()
+
+            if self.normalize_by_uncond:
+                ap = self.model(**answer_input['encoding'], use_cache=False).logits
+                ap = torch.log_softmax(ap, dim=-1)
+                ap = ap.gather(1, answer_input['index'].unsqueeze(-1).repeat(1, 1, ap.size(-1)))
+                ap = ap.gather(2, answer_input['target']).masked_fill(answer_input['index_padding_mask'].unsqueeze(-1), 0.0).squeeze()
+                ap = ap.sum(-1).div(answer_input['index_padding_mask'].logical_not().count_nonzero(-1)).exp()
+                p /= ap
+            
             probs.append(p)
         
         probs = torch.stack(probs, dim=1)
@@ -58,32 +65,24 @@ class LightningModuleForMultipleChoiceQuestion(LightningModuleX):
         correct = 0
         total = 0
         entropy_list = []
-        for i, example, question, choices, answer, p, e in zip(
-            batch['id'],
-            batch['example'],
-            batch['question'],
-            batch['choices'],
-            batch['answer'],
-            probs,
-            entropy
-        ):
+        for x, p, e in zip(batch['data'], probs, entropy):
             e = e.item()
             index = p.argmax().item()
             entropy_list.append(e)
             
-            self.results[i] = {
-                'example': example,
-                'question': question,
-                'choices': choices,
-                'answer': answer['text'],
+            self.results[x['id']] = {
+                'example': x['example'],
+                'question': x['question'],
+                'choices': x['choices'],
+                'answer': x['answer']['text'],
                 'prediction': {
-                    'text': choices[index],
+                    'text': x['choices'][index],
                     'probs': p.tolist(),
                     'entropy': e,
                 }
             }
 
-            correct += 1 if index == answer['index'] else 0
+            correct += 1 if index == x['answer']['index'] else 0
             total += 1
 
         self.correct += correct
@@ -126,17 +125,19 @@ class LightningModuleForMultipleChoiceQuestion(LightningModuleX):
             self.log('Entropy', entropy / total)
             self.log('Accuracy', correct / total)
 
+
 def main(
     model_path: str,
     data_path: str,
     k_shot: int,
     batch_size: int = 1,
+    normalize_by_uncond: bool = False,
     num_datapoints: int | None = None,
     save_dir: str | None = 'logs/eval',
     name: str | None = None,
     version: str | None = None,
 ):
-    model = LightningModuleForMultipleChoiceQuestion(model_path)
+    model = LightningModuleForMultipleChoiceQuestion(model_path, normalize_by_uncond=normalize_by_uncond)
     datamodule = DataModuleForMultipleChoiceQuestion(
         tokenizer=model.tokenizer,
         k_shot=k_shot,
@@ -156,8 +157,9 @@ def main(
     )
     trainer.test(model, datamodule)
     if model.is_global_zero:
-        write_json(f'{trainer.logger.log_dir}/results.json', model.results)
-
+        path = os.path.join(trainer.logger.log_dir, 'results.json')
+        write_json(path, model.results)
+        print(f'The result is dumped to: {path}')
 
 if __name__ == '__main__':
     fire.Fire(main)
