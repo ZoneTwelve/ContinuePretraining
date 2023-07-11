@@ -132,6 +132,7 @@ def main(
     k_shot: int,
     batch_size: int = 1,
     normalize_by_uncond: bool = False,
+    convert_to_chs: bool = False,
     num_datapoints: int | None = None,
     save_dir: str | None = 'logs/eval',
     name: str | None = None,
@@ -141,6 +142,7 @@ def main(
     datamodule = DataModuleForMultipleChoiceQuestion(
         tokenizer=model.tokenizer,
         k_shot=k_shot,
+        convert_to_chs=convert_to_chs,
         data_path=data_path,
         test_split_size=num_datapoints,
         test_batch_size=batch_size,
