@@ -20,6 +20,7 @@ def load_datasets(data_path: str) -> Dataset:
         paths = [data_path]
     else:
         paths = glob.glob(os.path.join(data_path, '**/*.*'), recursive=True)
+        paths = list(filter(lambda p: os.path.isfile(p), paths))
 
     progress = tqdm(total=len(paths), desc='Loading Files', leave=False)
     for p in paths:       

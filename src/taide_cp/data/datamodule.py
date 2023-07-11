@@ -1,14 +1,12 @@
 import os
 import random
 import shutil
-import string
 from tempfile import gettempdir, mkdtemp
 from typing import Any, Dict, Literal, Mapping, Optional, Type, Union
 
 import lightning as L
 from datasets import (Dataset, DatasetDict, get_dataset_config_info,
                       load_dataset, load_from_disk)
-from datasets.config import HF_DATASETS_CACHE
 from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerBase
 
@@ -24,6 +22,12 @@ STAGE2SPLIT: Mapping[StageType, SplitType] = {
     'test': 'test',
     'predict': 'pred',
 }
+
+def get_random_dir_path(seed: Optional[int] = None):
+    s = 'abcdefghijklmnopqrstuvwxyz0123456789_'
+    r = random.Random(seed)
+    name = 'tmp' + ''.join(r.choice(s) for _ in range(8))
+    return os.path.join(gettempdir(), name)
 
 class LightningDataModuleX(L.LightningDataModule):
     datacollator_cls: Optional[Type[DataCollator]] = None
@@ -53,7 +57,6 @@ class LightningDataModuleX(L.LightningDataModule):
         super().__init__()
 
         self.dataset = DatasetDict()
-        self.cleanup_dataset_path = False
         
         self.data_path = data_path
         self.dataset_path = dataset_path
@@ -79,15 +82,12 @@ class LightningDataModuleX(L.LightningDataModule):
         }
         self.set_batch_size(train_batch_size, val_batch_size, test_batch_size, pred_batch_size)
 
+        self.cleanup_dataset_path = False
         if dataset_path is None:
             self.cleanup_dataset_path = True
 
-            if SLURM.is_slurm:
-                r = random.Random(SLURM.job_id)
-                name = ''.join(r.choice(string.ascii_lowercase) for _ in range(8))
-                self.dataset_path = os.path.join(gettempdir(), 'tmp' + name)
-            else:
-                self.dataset_path = mkdtemp()
+            seed = SLURM.job_id or os.getpgid(os.getpid())
+            self.dataset_path = get_random_dir_path(seed)
 
         if self.datacollator_cls is not None:
             datacollator_kwargs = datacollator_kwargs or {}
