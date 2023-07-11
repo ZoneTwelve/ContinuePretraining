@@ -106,25 +106,25 @@ class LightningModuleForMultipleChoiceQuestion(LightningModuleX):
             object_gather_list = [None] * self.trainer.world_size if self.global_rank == 0 else None
             gather_object(self.results, object_gather_list)
 
-            if self.global_rank == 0:
-                for r in object_gather_list:
-                    self.results |= r
-                
-                keys = sorted(self.results.keys())
-                self.results = [self.results[k] for k in keys]
+        if self.global_rank == 0:
+            for r in object_gather_list:
+                self.results |= r
+            
+            keys = sorted(self.results.keys())
+            self.results = [self.results[k] for k in keys]
 
-                correct = 0
-                entropy = 0
-                total = len(self.results)
-                for x in self.results:
-                    if x['answer'] == x['prediction']['text']:
-                        correct += 1
-                    entropy += x['prediction']['entropy']
-                
-                self.log('Correct', correct)
-                self.log('Total', total)
-                self.log('Entropy', entropy / total)
-                self.log('Accuracy', correct / total)
+            correct = 0
+            entropy = 0
+            total = len(self.results)
+            for x in self.results:
+                if x['answer'] == x['prediction']['text']:
+                    correct += 1
+                entropy += x['prediction']['entropy']
+            
+            self.log('Correct', correct)
+            self.log('Total', total)
+            self.log('Entropy', entropy / total)
+            self.log('Accuracy', correct / total)
 
 def main(
     model_path: str,
