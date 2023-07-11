@@ -1,4 +1,3 @@
-from abc import ABC, abstractstaticmethod
 from functools import partial
 from pathlib import Path
 from typing import Callable, Literal, Optional, Set, Tuple, Type, TypedDict
@@ -6,7 +5,7 @@ from typing import Callable, Literal, Optional, Set, Tuple, Type, TypedDict
 import torch
 from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
 from torch import nn
-from torch.distributed.fsdp.wrap import wrap, transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, wrap
 from torch.optim import AdamW
 from transformers import (PretrainedConfig, PreTrainedModel,
                           PreTrainedTokenizerBase)
@@ -63,11 +62,7 @@ def extend_tokens(
         tie_partially_frozen_weights(model)
 
 
-class LightningModuleForPreTraining(LightningModuleX, ABC):
-    @property
-    @abstractstaticmethod
-    def name() -> str: ...
-
+class LightningModuleForPreTraining(LightningModuleX):
     model_class: Optional[Type[PreTrainedModel]] = None
     config_class: Optional[Type[PretrainedConfig]] = None
     tokenizer_class: Optional[Type[PreTrainedTokenizerBase]] = None

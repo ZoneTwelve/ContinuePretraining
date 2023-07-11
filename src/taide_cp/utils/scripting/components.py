@@ -26,7 +26,6 @@ __all__ = [
 
 @component()
 def get_model_for_pre_training(
-    model_type: str,
     model_path: str,
     tokenizer_path: Optional[str] = None,
     extend_tokens: bool = False,
@@ -41,10 +40,17 @@ def get_model_for_pre_training(
     min_lr_factor: float = 0.1,
     ckpt_path: Optional[str] = None,
 ):
-    from taide_cp.training import MODELS_FOR_PRE_TRAINING
+    from ...models import AutoConfig
+    from ...training import MODELS_FOR_PRE_TRAINING
     
-    model_cls = MODELS_FOR_PRE_TRAINING[model_type]
-    return model_cls(
+    config = AutoConfig.from_pretrained(model_path)
+    for model_class in MODELS_FOR_PRE_TRAINING:
+        if config.__class__ is model_class.config_class:
+            break
+    else:
+        raise ValueError(f'Model type `{config.model_type}` is not supported.')
+    
+    return model_class(
         model_path=model_path,
         tokenizer_path=tokenizer_path,
         extend_tokens=extend_tokens,
@@ -68,8 +74,8 @@ def get_datamodule_for_pre_training(
     data_path: str,
     dataset_path: str,
     micro_batch_size: int = 1,
-    micro_batch_size_val: Optional[int] = None,
-    val_split_size: Optional[Union[int, float]] = 0.1,
+    micro_batch_size_val: int | None = None,
+    val_split_size: int | float | None = 0.1,
     num_workers: int = 4,
 ):
     from ...data import DataModuleForPreTraining

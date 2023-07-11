@@ -7,7 +7,6 @@ from .lightning_module_for_pre_training import LightningModuleForPreTraining
 
 
 class MPTLightningModuleForPreTraining(LightningModuleForPreTraining):
-    name = 'mpt'
     model_class = MPTForCausalLM
     ds_model_class = DeepSpeedMPTForCausalLM
     config_class = MPTConfig
