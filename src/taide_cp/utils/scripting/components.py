@@ -177,7 +177,7 @@ def get_trainer(
     check_val_every_n_epoch: Optional[int] = 1,
     enable_checkpointing: Optional[bool] = None,
     accumulate_grad_batches: int = 1,
-    gradient_clip_val: Optional[Union[int, float]] = None,
+    gradient_clip_val: Optional[Union[int, float]] = 1.0,
     plugins: Optional[Union["PLUGIN_INPUT", List["PLUGIN_INPUT"]]] = None,
     default_root_dir: Optional["_PATH"] = None,
 ):
