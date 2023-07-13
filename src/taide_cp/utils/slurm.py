@@ -31,7 +31,7 @@ class SLURM:
 
     @staticproperty
     def job_name():
-        return parse_ev(str, 'SLURM_JOB_ID')
+        return parse_ev(str, 'SLURM_JOB_NAME')
     
     @staticproperty
     def num_nodes():
