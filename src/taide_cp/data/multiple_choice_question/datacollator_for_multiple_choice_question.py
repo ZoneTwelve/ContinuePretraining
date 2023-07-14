@@ -149,21 +149,21 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
             })
 
         choice_inputs = []
-        answer_context_length = self.tokenizer([choice_context], return_length=True, add_special_tokens=False)['length'][0]
+        choice_context_length = self.tokenizer([choice_context], return_length=True, add_special_tokens=False)['length'][0]
         for batch_choice in batch_choices:
-            context_answer_encoding = self.tokenizer(batch_choice, return_token_type_ids=False, add_special_tokens=False)
-            ca_input_ids, ca_attention_mask = pad_input_ids(context_answer_encoding['input_ids'], self.pad_token_id)
-            padding_lengths = torch.count_nonzero(1 - ca_attention_mask, dim=1)
+            context_choice_encoding = self.tokenizer(batch_choice, return_token_type_ids=False, add_special_tokens=False)
+            cc_input_ids, cc_attention_mask = pad_input_ids(context_choice_encoding['input_ids'], self.pad_token_id)
+            padding_lengths = torch.count_nonzero(1 - cc_attention_mask, dim=1)
             
-            index = [torch.arange(answer_context_length, ca_input_ids.size(1) - p) for p in padding_lengths]
+            index = [torch.arange(choice_context_length, cc_input_ids.size(1) - p) for p in padding_lengths]
             index, padding_mask = padded_stack(index)
-            target = ca_input_ids.unsqueeze(-1).gather(1, index.unsqueeze(-1))
+            target = cc_input_ids.unsqueeze(-1).gather(1, index.unsqueeze(-1))
             index[~padding_mask] -= 1
 
             choice_inputs.append({
                 'encoding': {
-                    'input_ids': ca_input_ids,
-                    'attention_mask': ca_attention_mask,
+                    'input_ids': cc_input_ids,
+                    'attention_mask': cc_attention_mask,
                 },
                 'target': target,
                 'index': index,
