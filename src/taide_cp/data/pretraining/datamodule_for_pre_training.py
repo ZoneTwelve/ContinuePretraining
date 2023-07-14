@@ -145,15 +145,8 @@ class DataModuleForPreTraining(LightningDataModuleX):
                 num_proc=self.num_proc,
             )
 
-            dataset = self.split(rearranged_dataset)
-            dataset.save_to_disk(self.rearranged_dataset_path)
+            rearranged_dataset.save_to_disk(self.rearranged_dataset_path)
     
     def setup(self, stage: Optional[StageType] = None) -> None:
-        if stage is None:
-            self.dataset = load_from_disk(self.rearranged_dataset_path)
-        elif stage == 'fit':
-            self.dataset['train'] = load_from_disk(os.path.join(self.rearranged_dataset_path, 'train'))
-            self.dataset['val'] = load_from_disk(os.path.join(self.rearranged_dataset_path, 'val'))
-        else:
-            split = STAGE2SPLIT[stage]
-            self.dataset[split] = load_from_disk(os.path.join(self.rearranged_dataset_path, split))
+        self.dataset = load_from_disk(self.rearranged_dataset_path)
+        self.dataset = self.split(self.dataset)
