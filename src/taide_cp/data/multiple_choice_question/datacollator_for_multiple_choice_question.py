@@ -49,6 +49,9 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
         self.example = ''
         self.convert_to_chs = convert_to_chs
 
+        self.pad_token_id = tokenizer.pad_token_id if 'pad_token' in tokenizer.special_tokens_map else tokenizer.eos_token_id
+        assert self.pad_token_id is not None
+
     def get_prompt(
         self,
         x: Dict[str, Any],
@@ -76,13 +79,15 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
         batch_example = []
         batch_example_question = []
         batch_example_question_choices = [[] for _ in range(num_choices)]
-        batch_answers = [[] for _ in range(num_choices)]
+        batch_choices = [[] for _ in range(num_choices)]
         batch_data = []
 
-        answer_context = '答案：'
+        # Some tokenizers don't add the BOS token (e.g., tokenizers of the MPT model),
+        # but we always need one, so we add it manually.
+        choice_context = f'{self.tokenizer.bos_token}'
 
         if self.convert_to_chs:
-            answer_context = t2s.convert(answer_context)
+            choice_context = t2s.convert(choice_context)
 
         for x in batch:
             question = self.get_prompt(x, with_answer=False, with_example=False)
@@ -98,7 +103,7 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
             batch_example_question.append(example + question)
             for i in range(num_choices):
                 batch_example_question_choices[i].append(self.example + question + choices[i])
-                batch_answers[i].append(answer_context + choices[i])
+                batch_choices[i].append(choice_context + choices[i])
 
             batch_data.append({
                 'id': x['id'],
@@ -119,8 +124,11 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
         example_question_length = self.tokenizer(batch_example_question, return_length=True)['length']
         question_choice_inputs = []
         for batch_example_question_choice in batch_example_question_choices:
+            # We want the padding side to always be right,
+            # but some tokenizers don't support it (e.g., ChatGLM),
+            # so we implement the padding logic ourselves.
             example_question_choice_encoding = self.tokenizer(batch_example_question_choice, return_token_type_ids=False)
-            eqc_input_ids, eqc_attention_mask = pad_input_ids(example_question_choice_encoding['input_ids'], self.tokenizer.pad_token_id)
+            eqc_input_ids, eqc_attention_mask = pad_input_ids(example_question_choice_encoding['input_ids'], self.pad_token_id)
             
             qc_input_ids = eqc_input_ids[:, example_length:]
             padding_lengths = torch.count_nonzero(1 - eqc_attention_mask, dim=1)
@@ -140,11 +148,11 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
                 'choice_index_padding_mask': padding_mask,
             })
 
-        answer_inputs = []
-        answer_context_length = self.tokenizer(answer_context, return_length=True)['length']
-        for batch_answer in batch_answers:
-            context_answer_encoding = self.tokenizer(batch_answer, return_token_type_ids=False)
-            ca_input_ids, ca_attention_mask = pad_input_ids(context_answer_encoding['input_ids'], self.tokenizer.pad_token_id)
+        choice_inputs = []
+        answer_context_length = self.tokenizer([choice_context], return_length=True, add_special_tokens=False)['length'][0]
+        for batch_choice in batch_choices:
+            context_answer_encoding = self.tokenizer(batch_choice, return_token_type_ids=False, add_special_tokens=False)
+            ca_input_ids, ca_attention_mask = pad_input_ids(context_answer_encoding['input_ids'], self.pad_token_id)
             padding_lengths = torch.count_nonzero(1 - ca_attention_mask, dim=1)
             
             index = [torch.arange(answer_context_length, ca_input_ids.size(1) - p) for p in padding_lengths]
@@ -152,7 +160,7 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
             target = ca_input_ids.unsqueeze(-1).gather(1, index.unsqueeze(-1))
             index[~padding_mask] -= 1
 
-            answer_inputs.append({
+            choice_inputs.append({
                 'encoding': {
                     'input_ids': ca_input_ids,
                     'attention_mask': ca_attention_mask,
@@ -162,12 +170,9 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
                 'index_padding_mask': padding_mask
             })
 
-        # print(self.tokenizer.batch_decode(question_choice_inputs[0]['choice_target'].squeeze()))
-        # print(self.tokenizer.batch_decode(answer_inputs[0]['target'].squeeze()))
-
         return {
             'data': batch_data,
-            'example_encoding': example_encoding,
+            'example_encoding': example_encoding if example_encoding['input_ids'].size(1) > 0 else None,
             'question_choice_inputs': question_choice_inputs,
-            'answer_inputs': answer_inputs,
+            'choice_inputs': choice_inputs,
         }
