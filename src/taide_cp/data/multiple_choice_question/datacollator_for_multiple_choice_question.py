@@ -109,7 +109,9 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
                 'example': self.example,
                 'question': question,
                 'choices': x['choices'],
-                'answer': {'index': x['answer'], 'text': x['choices'][x['answer']]}
+                'answer': {'index': x['answer'], 'text': x['choices'][x['answer']]},
+                'lv1_domain': x.get('lv1_domain', ''),
+                'lv2_domain': x.get('lv2_domain', '')
             })
         
         example_encoding = self.tokenizer(

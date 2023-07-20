@@ -63,12 +63,13 @@ class LightningModuleForMultipleChoiceQuestion(LightningModuleX):
         entropy = posterior / posterior.sum(-1).unsqueeze(-1)
         entropy = -entropy.log().mul(entropy).sum(-1)
         
-        for i, x in enumerate(batch['data']):            
+        for i, x in enumerate(batch['data']):
             self.results[x['id']] = {
                 'example': x['example'],
                 'question': x['question'],
                 'choices': x['choices'],
                 'answer': x['answer']['text'],
+                'domain': f'{x["lv1_domain"]}/{x["lv2_domain"]}',
                 'prediction': {
                     'raw': {
                         'answer': x['choices'][posterior[i].argmax()],
