@@ -18,7 +18,6 @@ __all__ = [
     'get_model_for_pre_training',
     'get_strategy',
     'get_datamodule_for_pre_training',
-    'get_wandb_logger',
     'get_logger',
     'get_trainer'
 ]
@@ -91,30 +90,6 @@ def get_datamodule_for_pre_training(
         num_workers=num_workers,
     )
 
-
-@component()
-def get_wandb_logger(
-    name: Optional[str] = None,
-    version: Optional[str] = None,
-    save_dir: str = './logs/',
-    project: str = 'taide_cp',
-    tags: Optional[str] = None,
-    notes: Optional[str] = None,
-    group: Optional[str] = None,
-    job_type: Optional[str] = None,
-):
-    from lightning.pytorch.loggers import WandbLogger
-
-    return WandbLogger(
-        name=name,
-        version=version,
-        save_dir=save_dir,
-        project=project,
-        tags=re.split(r',\s*', tags) if tags else [],
-        notes=notes,
-        group=group,
-        job_type=job_type,
-    )
 
 @component()
 def get_logger(

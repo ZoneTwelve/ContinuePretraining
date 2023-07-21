@@ -2,13 +2,18 @@ NODES=1
 GPUS=1
 TIME=
 ACCOUNT="GOV112003"
-PARTITOIN="gpNCHC_LLM"
+PARTITOIN="gpNCHC_LLM" # gpNCHC_LLM gtest gp1d
 NODELIST=
 JOB_NAME="interactive.srun.sh"
 
 if [ $1 ]
 then
     GPUS=$1
+fi
+
+if [ $2 ]
+then
+    PARTITOIN=$2
 fi
 
 if [ $TIME ]

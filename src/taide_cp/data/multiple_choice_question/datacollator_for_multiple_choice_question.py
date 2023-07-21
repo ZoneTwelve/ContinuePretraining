@@ -7,7 +7,6 @@ from transformers import PreTrainedTokenizerBase
 
 from ..datacollator import DataCollator
 
-
 t2s = opencc.OpenCC('t2s')
 
 def padded_stack(tensors: list[torch.Tensor], value: int | float = 0) -> torch.Tensor:

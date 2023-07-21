@@ -1,20 +1,19 @@
-from typing import Optional
-
 import fire
 
 from taide_cp.utils import SLURM
 from taide_cp.utils.scripting import *
+import multiprocess
 
 
 @entry_point(
     get_model_for_pre_training,
     get_datamodule_for_pre_training,
-    get_wandb_logger,
+    get_logger,
     get_trainer,
 )
 def main(
-    seed: Optional[int] = None,
-    ckpt_path: Optional[str] = None,
+    seed: int | None = None,
+    ckpt_path: str | None = None,
     **kwargs,
 ):
     import lightning as L
@@ -23,6 +22,8 @@ def main(
                                              ModelCheckpoint)
 
     from taide_cp.lightning import DeepSpeedStrategy
+
+    multiprocess.set_start_method('spawn')
     
     L.seed_everything(seed)
 
@@ -40,7 +41,7 @@ def main(
             offload_parameters=True,
             pin_memory=True,
         ),
-        logger=get_wandb_logger(**kwargs),
+        logger=get_logger(**kwargs),
         callbacks=[
             LearningRateMonitor(),
             EarlyStopping(monitor='Perplexity/Val'),

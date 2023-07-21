@@ -1,7 +1,7 @@
 import os
 import random
 import shutil
-from tempfile import gettempdir, mkdtemp
+from tempfile import gettempdir
 from typing import Any, Dict, Literal, Mapping, Optional, Type, Union
 
 import lightning as L

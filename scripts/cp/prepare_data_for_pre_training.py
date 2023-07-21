@@ -1,7 +1,5 @@
 import fire
-
-from taide_cp.data import DataModuleForPreTraining
-from taide_cp.models import AutoTokenizer
+import multiprocess
 
 
 def main(
@@ -11,6 +9,11 @@ def main(
     sequence_length: int,
     num_proc: int | None = None,
 ):
+    from taide_cp.data import DataModuleForPreTraining
+    from taide_cp.models import AutoTokenizer
+
+    multiprocess.set_start_method('spawn')
+
     datamodule = DataModuleForPreTraining(
         tokenizer=AutoTokenizer.from_pretrained(tokenizer_path, model_max_length=None),
         sequence_length=sequence_length,

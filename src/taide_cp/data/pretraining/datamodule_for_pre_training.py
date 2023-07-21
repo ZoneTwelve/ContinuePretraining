@@ -8,7 +8,7 @@ from tqdm.auto import tqdm
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerBase
 
 from ...utils import DatasetsContextManager, disable_output
-from ..datamodule import STAGE2SPLIT, LightningDataModuleX, StageType
+from ..datamodule import LightningDataModuleX, StageType
 from .datacollator_for_pre_training import DataCollatorForPreTraining
 
 
