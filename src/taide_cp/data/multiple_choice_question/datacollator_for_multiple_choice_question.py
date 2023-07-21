@@ -9,21 +9,23 @@ from ..datacollator import DataCollator
 
 t2s = opencc.OpenCC('t2s')
 
-def padded_stack(tensors: list[torch.Tensor], value: int | float = 0) -> torch.Tensor:
+
+def padded_stack(tensors: list[torch.Tensor],
+                 value: int | float = 0) -> torch.Tensor:
     full_size = max([x.size(-1) for x in tensors])
 
     out = torch.stack(
         [
-            F.pad(x, (0, full_size - x.size(-1)), value=value) if full_size - x.size(-1) > 0 else x
-            for x in tensors
+            F.pad(x, (0, full_size - x.size(-1)), value=value)
+            if full_size - x.size(-1) > 0 else x for x in tensors
         ],
         dim=0,
     )
-    
+
     padding_mask = torch.zeros_like(out, dtype=torch.bool)
     for i, x in enumerate(tensors):
         padding_mask[i, x.size(-1):] = True
-    
+
     return out, padding_mask
 
 
@@ -42,7 +44,9 @@ def pad_input_ids(input_ids: list[list[int]], pad_token_id: int):
 
 
 class DataCollatorForMultipleChoiceQuestion(DataCollator):
-    def __init__(self, tokenizer: PreTrainedTokenizerBase, convert_to_chs: bool = False) -> None:
+    def __init__(self,
+                 tokenizer: PreTrainedTokenizerBase,
+                 convert_to_chs: bool = False) -> None:
         super().__init__(tokenizer)
 
         self.example = ''
@@ -65,7 +69,7 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
         elif isinstance(with_answer, str):
             s += with_answer + '\n'
         return s
-    
+
     def set_examples(self, examples: List[Dict[str, Any]]):
         self.example = ''
         for x in examples:
@@ -74,7 +78,7 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
 
     def __call__(self, batch: List[Any]) -> Dict[str, Any]:
         num_choices = len(batch[0]['choices'])
-        
+
         batch_example = []
         batch_example_question = []
         batch_example_question_choices = [[] for _ in range(num_choices)]
@@ -89,7 +93,9 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
             choice_context = t2s.convert(choice_context)
 
         for x in batch:
-            question = self.get_prompt(x, with_answer=False, with_example=False)
+            question = self.get_prompt(x,
+                                       with_answer=False,
+                                       with_example=False)
             example = self.example
             choices = x['choices']
 
@@ -101,7 +107,8 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
             batch_example.append(example)
             batch_example_question.append(example + question)
             for i in range(num_choices):
-                batch_example_question_choices[i].append(self.example + question + choices[i])
+                batch_example_question_choices[i].append(self.example +
+                                                         question + choices[i])
                 batch_choices[i].append(choice_context + choices[i])
 
             batch_data.append({
@@ -109,11 +116,14 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
                 'example': self.example,
                 'question': question,
                 'choices': x['choices'],
-                'answer': {'index': x['answer'], 'text': x['choices'][x['answer']]},
+                'answer': {
+                    'index': x['answer'],
+                    'text': x['choices'][x['answer']]
+                },
                 'lv1_domain': x.get('lv1_domain', ''),
                 'lv2_domain': x.get('lv2_domain', '')
             })
-        
+
         example_encoding = self.tokenizer(
             batch_example,
             return_tensors='pt',
@@ -122,41 +132,62 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
         )
         example_length = example_encoding.pop('length')[0]
 
-        example_question_length = self.tokenizer(batch_example_question, return_length=True)['length']
+        example_question_length = self.tokenizer(batch_example_question,
+                                                 return_length=True)['length']
         question_choice_inputs = []
         for batch_example_question_choice in batch_example_question_choices:
             # We want the padding side to always be right,
             # but some tokenizers don't support it (e.g., ChatGLM),
             # so we implement the padding logic ourselves.
-            example_question_choice_encoding = self.tokenizer(batch_example_question_choice, return_token_type_ids=False)
-            eqc_input_ids, eqc_attention_mask = pad_input_ids(example_question_choice_encoding['input_ids'], self.pad_token_id)
-            
-            qc_input_ids = eqc_input_ids[:, example_length:]
-            padding_lengths = torch.count_nonzero(1 - eqc_attention_mask, dim=1)
+            example_question_choice_encoding = self.tokenizer(
+                batch_example_question_choice, return_token_type_ids=False)
+            eqc_input_ids, eqc_attention_mask = pad_input_ids(
+                example_question_choice_encoding['input_ids'],
+                self.pad_token_id)
 
-            index = [torch.arange(eq_length - example_length, qc_input_ids.size(1) - p_length) for eq_length, p_length in zip(example_question_length, padding_lengths)]
+            qc_input_ids = eqc_input_ids[:, example_length:]
+            padding_lengths = torch.count_nonzero(1 - eqc_attention_mask,
+                                                  dim=1)
+
+            index = [
+                torch.arange(eq_length - example_length,
+                             qc_input_ids.size(1) - p_length) for eq_length,
+                p_length in zip(example_question_length, padding_lengths)
+            ]
             index, padding_mask = padded_stack(index)
             target = qc_input_ids.unsqueeze(-1).gather(1, index.unsqueeze(-1))
-            index[~padding_mask] -= 1 # Shift for logits
+            index[~padding_mask] -= 1  # Shift for logits
 
             question_choice_inputs.append({
                 'encoding': {
                     'input_ids': qc_input_ids,
                     'attention_mask': eqc_attention_mask
                 },
-                'choice_index': index,
-                'choice_target': target,
-                'choice_index_padding_mask': padding_mask,
+                'choice_index':
+                index,
+                'choice_target':
+                target,
+                'choice_index_padding_mask':
+                padding_mask,
             })
 
         choice_inputs = []
-        choice_context_length = self.tokenizer([choice_context], return_length=True, add_special_tokens=False)['length'][0]
+        choice_context_length = self.tokenizer(
+            [choice_context], return_length=True,
+            add_special_tokens=False)['length'][0]
         for batch_choice in batch_choices:
-            context_choice_encoding = self.tokenizer(batch_choice, return_token_type_ids=False, add_special_tokens=False)
-            cc_input_ids, cc_attention_mask = pad_input_ids(context_choice_encoding['input_ids'], self.pad_token_id)
+            context_choice_encoding = self.tokenizer(
+                batch_choice,
+                return_token_type_ids=False,
+                add_special_tokens=False)
+            cc_input_ids, cc_attention_mask = pad_input_ids(
+                context_choice_encoding['input_ids'], self.pad_token_id)
             padding_lengths = torch.count_nonzero(1 - cc_attention_mask, dim=1)
-            
-            index = [torch.arange(choice_context_length, cc_input_ids.size(1) - p) for p in padding_lengths]
+
+            index = [
+                torch.arange(choice_context_length,
+                             cc_input_ids.size(1) - p) for p in padding_lengths
+            ]
             index, padding_mask = padded_stack(index)
             target = cc_input_ids.unsqueeze(-1).gather(1, index.unsqueeze(-1))
             index[~padding_mask] -= 1
@@ -172,8 +203,13 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
             })
 
         return {
-            'data': batch_data,
-            'example_encoding': example_encoding if example_encoding['input_ids'].size(1) > 0 else None,
-            'question_choice_inputs': question_choice_inputs,
-            'choice_inputs': choice_inputs,
+            'data':
+            batch_data,
+            'example_encoding':
+            example_encoding
+            if example_encoding['input_ids'].size(1) > 0 else None,
+            'question_choice_inputs':
+            question_choice_inputs,
+            'choice_inputs':
+            choice_inputs,
         }

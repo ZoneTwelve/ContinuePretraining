@@ -1,4 +1,6 @@
 import os
+from collections import defaultdict, OrderedDict
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import fire
 import torch
@@ -20,9 +22,9 @@ class LightningModuleForMultipleChoiceQuestion(LightningModuleX):
             model_path,
             torch_dtype='auto',
             low_cpu_mem_usage=True,
-            trust_remote_code=True
-        )
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+            trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path,
+                                                       trust_remote_code=True)
 
         self.example_past_kv = None
 
@@ -34,42 +36,62 @@ class LightningModuleForMultipleChoiceQuestion(LightningModuleX):
 
     def test_step(self, batch, batch_idx) -> STEP_OUTPUT | None:
         # The example cache does not work on the MPT model currently.
-        batch_size = batch['question_choice_inputs'][0]['encoding']['input_ids'].size(0)
-        if batch['example_encoding'] is not None and (self.example_past_kv is None or self.example_past_kv[0][0].size(0) != batch_size):
-            self.example_past_kv = self.model(**batch['example_encoding'], use_cache=True).past_key_values
+        batch_size = batch['question_choice_inputs'][0]['encoding'][
+            'input_ids'].size(0)
+        if batch['example_encoding'] is not None and (
+                self.example_past_kv is None
+                or self.example_past_kv[0][0].size(0) != batch_size):
+            self.example_past_kv = self.model(**batch['example_encoding'],
+                                              use_cache=True).past_key_values
 
         posterior = []
         prior = []
-        for question_choice_input, choice_input in zip(batch['question_choice_inputs'], batch['choice_inputs']):
-            p = self.model(**question_choice_input['encoding'], past_key_values=self.example_past_kv, use_cache=False).logits
+        for question_choice_input, choice_input in zip(
+                batch['question_choice_inputs'], batch['choice_inputs']):
+            p = self.model(**question_choice_input['encoding'],
+                           past_key_values=self.example_past_kv,
+                           use_cache=False).logits
             p = torch.log_softmax(p, dim=-1)
-            p = p.gather(1, question_choice_input['choice_index'].unsqueeze(-1).repeat(1, 1, p.size(-1)))
+            p = p.gather(
+                1, question_choice_input['choice_index'].unsqueeze(-1).repeat(
+                    1, 1, p.size(-1)))
             p = p.gather(2, question_choice_input['choice_target'])
-            p = p.masked_fill(question_choice_input['choice_index_padding_mask'].unsqueeze(-1), 0.0).squeeze()
-            p = p.sum(-1).div(question_choice_input['choice_index_padding_mask'].logical_not().count_nonzero(-1)).exp()
+            p = p.masked_fill(
+                question_choice_input['choice_index_padding_mask'].unsqueeze(
+                    -1), 0.0).squeeze()
+            p = p.sum(-1).div(
+                question_choice_input['choice_index_padding_mask'].logical_not(
+                ).count_nonzero(-1)).exp()
             posterior.append(p)
-        
+
             p = self.model(**choice_input['encoding'], use_cache=False).logits
             p = torch.log_softmax(p, dim=-1)
-            p = p.gather(1, choice_input['index'].unsqueeze(-1).repeat(1, 1, p.size(-1)))
-            p = p.gather(2, choice_input['target']).masked_fill(choice_input['index_padding_mask'].unsqueeze(-1), 0.0).squeeze()
-            p = p.sum(-1).div(choice_input['index_padding_mask'].logical_not().count_nonzero(-1)).exp()
+            p = p.gather(
+                1,
+                choice_input['index'].unsqueeze(-1).repeat(1, 1, p.size(-1)))
+            p = p.gather(2, choice_input['target']).masked_fill(
+                choice_input['index_padding_mask'].unsqueeze(-1),
+                0.0).squeeze()
+            p = p.sum(-1).div(
+                choice_input['index_padding_mask'].logical_not().count_nonzero(
+                    -1)).exp()
             prior.append(p)
-        
+
         posterior = torch.stack(posterior, dim=1)
         prior = torch.stack(prior, dim=1)
         information_gain = posterior.log() - prior.log()
 
         entropy = posterior / posterior.sum(-1).unsqueeze(-1)
         entropy = -entropy.log().mul(entropy).sum(-1)
-        
+
         for i, x in enumerate(batch['data']):
             self.results[x['id']] = {
                 'example': x['example'],
                 'question': x['question'],
                 'choices': x['choices'],
                 'answer': x['answer']['text'],
-                'domain': f'{x["lv1_domain"]}/{x["lv2_domain"]}',
+                'lv1_domain': x.get('lv1_domain', ''),
+                'lv2_domain': x.get('lv2_domain', ''),
                 'prediction': {
                     'raw': {
                         'answer': x['choices'][posterior[i].argmax()],
@@ -83,7 +105,8 @@ class LightningModuleForMultipleChoiceQuestion(LightningModuleX):
                 }
             }
 
-            self.correct += 1 if posterior[i].argmax() == x['answer']['index'] else 0
+            self.correct += 1 if posterior[i].argmax(
+            ) == x['answer']['index'] else 0
             self.total += 1
 
         self.entropy_sum += entropy.sum().item()
@@ -101,36 +124,83 @@ class LightningModuleForMultipleChoiceQuestion(LightningModuleX):
 
     def on_test_epoch_end(self) -> None:
         if self.trainer.world_size > 1:
-            object_gather_list = [None] * self.trainer.world_size if self.global_rank == 0 else None
+            object_gather_list = [
+                None
+            ] * self.trainer.world_size if self.global_rank == 0 else None
             gather_object(self.results, object_gather_list)
 
         if self.global_rank == 0:
             for r in object_gather_list:
                 self.results |= r
-            
+
             keys = sorted(self.results.keys())
             self.results = [self.results[k] for k in keys]
+            metrics: Dict[str, float] = self.__calc_metrics(self.results)
 
-            correct_raw = 0
-            correct_ig = 0
-            entropy = 0
-            total = len(self.results)
-            for x in self.results:
-                if x['answer'] == x['prediction']['raw']['answer']:
-                    correct_raw += 1
-
-                if x['answer'] == x['prediction']['information_gain']['answer']:
-                    correct_ig += 1
-                    
-                entropy += x['prediction']['entropy']
             
-            self.log('Total', total)
-            self.log('Entropy', entropy / total)
+            if 'lv1_domain' in self.results[0]:  # have domain info
+                metrics['avg_acc_lv1/information_gain'] = 0
+                metrics['avg_acc_lv2/information_gain'] = 0
+                metrics['avg_acc_lv1/raw'] = 0
+                metrics['avg_acc_lv2/raw'] = 0
+                domain_result_lv1: Dict[str, list] = defaultdict(lambda: [])
+                domain_result_lv2: Dict[str, list] = defaultdict(lambda: [])
 
-            self.log('Correct/Raw', correct_raw)
-            self.log('Accuracy/Raw', correct_raw / total)
-            self.log('Correct/InformationGain', correct_ig)
-            self.log('Accuracy/InformationGain', correct_ig / total)
+                # groupby
+                for r in self.results:
+                    if not r['lv1_domain']:
+                        continue
+                    domain_result_lv1[r['lv1_domain']].append(r)
+                    domain_result_lv2[
+                        f'{r["lv1_domain"]}-{r["lv2_domain"]}'].append(r)
+
+                for dom, result in domain_result_lv1.items():
+                    dom_metrics = self.__calc_metrics(result)
+                    for k, v in dom_metrics.items():
+                        metrics[f'{dom}/{k}'] = v
+                    metrics['avg_acc_lv1/information_gain'] += metrics[f'{dom}/acc/information_gain']
+                    metrics['avg_acc_lv1/raw'] += metrics[f'{dom}/acc/raw']
+                
+                for dom, result in domain_result_lv2.items():
+                    dom_metrics = self.__calc_metrics(result)
+                    for k, v in dom_metrics.items():
+                        metrics[f'{dom}/{k}'] = v
+                    metrics['avg_acc_lv2/information_gain'] += metrics[f'{dom}/acc/information_gain']
+                    metrics['avg_acc_lv2/raw'] += metrics[f'{dom}/acc/raw'] 
+
+                metrics['avg_acc_lv1/information_gain'] /= len(domain_result_lv1)
+                metrics['avg_acc_lv2/information_gain'] /= len(domain_result_lv2)
+                metrics['avg_acc_lv1/raw'] /= len(domain_result_lv1)
+                metrics['avg_acc_lv2/raw'] /= len(domain_result_lv2)
+            
+            metrics = OrderedDict(sorted(metrics.items(), key=lambda x: x[0]))
+            self.log_dict(metrics, rank_zero_only=True)
+            self.metrics = metrics
+
+    @staticmethod
+    def __calc_metrics(result: Dict[str, List]) -> Dict[str, float]:
+        correct_raw = 0
+        correct_ig = 0
+        entropy = 0
+        total = len(result)
+        
+        for x in result:
+            if x['answer'] == x['prediction']['raw']['answer']:
+                correct_raw += 1
+
+            if x['answer'] == x['prediction']['information_gain']['answer']:
+                correct_ig += 1
+
+            entropy += x['prediction']['entropy']
+
+        return {
+            'total': total,
+            'entropy': entropy / total,
+            'correct/raw': correct_raw,
+            'acc/raw': correct_raw / total,
+            'correct/information_gain': correct_ig,
+            'acc/information_gain': correct_ig / total,
+        }
 
 
 def main(
@@ -168,7 +238,8 @@ def main(
 
     if trainer.is_global_zero:
         path = os.path.join(trainer.logger.log_dir, 'results.json')
-        write_json(path, model.results)
+        result = {'metrics': model.metrics, 'results': model.results}
+        write_json(path, result)
         print(f'The result is dumped to: {path}')
 
 
