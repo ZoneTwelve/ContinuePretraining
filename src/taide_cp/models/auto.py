@@ -20,7 +20,7 @@ class AutoTokenizer(AutoTokenizer):
             get_tokenizer_config
         
         tokenizer_config = get_tokenizer_config(pretrained_model_name_or_path, **kwargs)
-        tokenizer_class = tokenizer_config['tokenizer_class']
+        tokenizer_class = tokenizer_config.pop('tokenizer_class', None)
 
         if tokenizer_class == 'LlamaTokenizer':
             kwargs['use_fast'] = kwargs.pop('use_fast', False)
