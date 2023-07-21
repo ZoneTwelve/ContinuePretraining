@@ -140,10 +140,11 @@ class DeepSpeedLlamaModel(LlamaModel):
 
 
 class DeepSpeedLlamaForCausalLM(LlamaForCausalLM):
-    def __init__(self, config: LlamaConfig):
+    def __init__(self, config):
         super(LlamaForCausalLM, self).__init__(config)
         self.model = DeepSpeedLlamaModel(config)
-
+        self.pretraining_tp = config.pretraining_tp
+        self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing
