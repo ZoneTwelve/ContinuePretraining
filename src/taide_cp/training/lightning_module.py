@@ -57,10 +57,6 @@ def enable_hooks(cls):
 @enable_hooks
 class LightningModuleX(L.LightningModule):
     logger: WandbLogger
-
-    @property
-    def checkpoint_dir(self):
-        return os.path.join(self.logger.save_dir, self.logger.name, self.logger.version, 'checkpoints')
     
     @property
     def is_global_zero(self):
@@ -73,8 +69,8 @@ class LightningModuleX(L.LightningModule):
     def __init__(self) -> None:
         super().__init__()
 
-        self._register_state_dict_hook(_state_dict_hook)
-        self.register_load_state_dict_post_hook(_load_state_dict_post_hook)
+        # self._register_state_dict_hook(_state_dict_hook)
+        # self.register_load_state_dict_post_hook(_load_state_dict_post_hook)
   
     def print_rank0(self, *args, **kwargs) -> None:
         if self.is_global_zero:

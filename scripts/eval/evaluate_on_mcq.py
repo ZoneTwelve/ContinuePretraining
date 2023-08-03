@@ -1,8 +1,9 @@
 import os
 from collections import defaultdict, OrderedDict
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List
 
 import fire
+from taide_cp.utils.scripting.decorators import entry_point
 import torch
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 from torch.distributed import gather_object
@@ -168,10 +169,13 @@ class LightningModuleForMultipleChoiceQuestion(LightningModuleX):
                     metrics['avg_acc_lv2/information_gain'] += metrics[f'{dom}/acc/information_gain']
                     metrics['avg_acc_lv2/raw'] += metrics[f'{dom}/acc/raw'] 
 
-                metrics['avg_acc_lv1/information_gain'] /= len(domain_result_lv1)
-                metrics['avg_acc_lv2/information_gain'] /= len(domain_result_lv2)
-                metrics['avg_acc_lv1/raw'] /= len(domain_result_lv1)
-                metrics['avg_acc_lv2/raw'] /= len(domain_result_lv2)
+                if domain_result_lv1:
+                    metrics['avg_acc_lv1/information_gain'] /= len(domain_result_lv1)
+                    metrics['avg_acc_lv1/raw'] /= len(domain_result_lv1)
+                
+                if domain_result_lv2:
+                    metrics['avg_acc_lv2/information_gain'] /= len(domain_result_lv2)
+                    metrics['avg_acc_lv2/raw'] /= len(domain_result_lv2)
             
             metrics = OrderedDict(sorted(metrics.items(), key=lambda x: x[0]))
             self.log_dict(metrics, rank_zero_only=True)
@@ -202,7 +206,10 @@ class LightningModuleForMultipleChoiceQuestion(LightningModuleX):
             'acc/information_gain': correct_ig / total,
         }
 
-
+@entry_point(
+    get_trainer,
+    get_logger
+)
 def main(
     model_path: str,
     data_path: str,
@@ -211,9 +218,11 @@ def main(
     convert_to_chs: bool = False,
     num_datapoints: int | None = None,
     save_dir: str | None = 'logs/eval',
-    name: str | None = None,
-    version: str | None = None,
+    **kwargs
 ):
+    kwargs['name'] = kwargs.pop('name', os.path.join('mcq', f'{k_shot}_shot'))
+    kwargs['version'] = kwargs.pop('version', os.path.basename(model_path) + f'_bs{batch_size}')
+
     model = LightningModuleForMultipleChoiceQuestion(model_path)
     datamodule = DataModuleForMultipleChoiceQuestion(
         tokenizer=model.tokenizer,
@@ -228,10 +237,10 @@ def main(
         logger=get_logger(
             logger_type='csv',
             save_dir=save_dir,
-            name=name,
-            version=version,
+            **kwargs
         ),
         enable_checkpointing=False,
+        **kwargs
     )
 
     trainer.test(model, datamodule)

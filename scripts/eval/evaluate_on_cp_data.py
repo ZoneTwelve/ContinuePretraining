@@ -1,27 +1,6 @@
-from typing import TYPE_CHECKING, Any, Dict, Optional
-
 import fire
 
 from taide_cp.utils.scripting import *
-
-if TYPE_CHECKING:
-    from datasets import Dataset
-    from transformers import PreTrainedTokenizer
-
-
-def get_unigram_probs(dataset: "Dataset", tokenizer: "PreTrainedTokenizer"):
-    import torch
-    from tqdm.auto import tqdm
-
-    probs = torch.zeros(len(tokenizer))
-    for x in tqdm(dataset):
-        input_ids = torch.tensor(x['input_ids'])
-        input_ids = input_ids[input_ids != -1]
-        ids, counts = input_ids.unique(return_counts=True)
-        probs[ids] += counts
-    probs /= probs.sum()
-    probs = probs.masked_fill(probs == 0, 1e-8)
-    return probs
 
 
 @entry_point(
@@ -58,9 +37,6 @@ def main(
         test_split_size=num_datapoints or 1.0,
         num_proc=num_proc,
     )
-
-    # model.pplu.token_probs = torch.load(token_probs_path)
-    # model.pplu.token_probs = get_unigram_probs(dataset, tokenizer)
 
     trainer = get_trainer(
         logger=get_logger('csv', save_dir='logs/eval', **kwargs),
