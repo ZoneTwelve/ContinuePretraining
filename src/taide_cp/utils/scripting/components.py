@@ -33,6 +33,7 @@ def get_model_for_pre_training(
     max_length: int = 2048,
     lr: float = 1e-4,
     betas: Tuple[float, float] = (0.9, 0.95),
+    eps: float = 1e-8,
     weight_decay: float = 1e-1,
     lr_scheduler_type: Optional[str] = None,
     num_warmup_steps: int = 0,
@@ -58,6 +59,7 @@ def get_model_for_pre_training(
         max_length=max_length,
         lr=lr,
         betas=betas,
+        eps=eps,
         weight_decay=weight_decay,
         lr_scheduler_type=lr_scheduler_type,
         num_warmup_steps=num_warmup_steps,
@@ -97,11 +99,13 @@ def get_logger(
     save_dir: str = 'logs',
     name: str | None = None,
     version: str | None = None,
-    project: str = 'taide_cp',
+    entity: str | None = 'tvllm',
+    project: str = 'Taide-CP',
     tags: str | list[str] | None = None,
     notes: str | None = None,
     group: str | None = None,
     job_type: str | None = None,
+    save_code: bool = True,
 ):
     from lightning.pytorch.loggers import CSVLogger, WandbLogger
 
@@ -120,11 +124,13 @@ def get_logger(
             name=name,
             version=version,
             save_dir=save_dir,
+            entity=entity,
             project=project,
             tags=tags,
             notes=notes,
             group=group,
             job_type=job_type,
+            save_code=save_code,
         )
 
 
