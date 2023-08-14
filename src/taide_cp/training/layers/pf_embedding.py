@@ -35,7 +35,7 @@ class PartiallyFrozenEmbedding(nn.Module):
         )
 
         self.trainable_embedding = nn.Embedding.from_pretrained(
-            embeddings.weight[:pivot],
+            embeddings.weight[pivot:],
             padding_idx=self.padding_idx - self.pivot if self.padding_idx is not None and self.padding_idx >= pivot else None,
             max_norm=self.max_norm,
             norm_type=self.norm_type,
