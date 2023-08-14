@@ -1,26 +1,11 @@
-from typing import Dict
-
 import torch
-import torch.nn.functional as F
-from torch import LongTensor, Tensor, nn
-
-
-def _state_dict_hook(module: "PartiallyFrozenEmbedding", state_dict: Dict[str, Tensor], prefix: str, local_metadata):
-    w1 = state_dict.pop(f'{prefix}w1')
-    w2 = state_dict.pop(f'{prefix}w2')
-    state_dict[f'{prefix}weight'] = torch.cat([w1, w2])
-
-
-def _load_state_dict_pre_hook(module: "PartiallyFrozenEmbedding", state_dict: Dict[str, Tensor], prefix: str, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
-    weight = state_dict.pop(f'{prefix}weight')
-    state_dict[f'{prefix}w1'] = weight[:module.pivot]
-    state_dict[f'{prefix}w2'] = weight[module.pivot:]
+from torch import LongTensor, nn
 
 
 class PartiallyFrozenEmbedding(nn.Module):
     @property
     def weight(self):
-        return torch.cat([self.w1, self.w2], dim=0)
+        return torch.cat([self.frozen_embedding.weight, self.trainable_embedding.weight], dim=0)
 
     def __init__(
         self,
@@ -39,15 +24,29 @@ class PartiallyFrozenEmbedding(nn.Module):
 
         self.pivot = pivot
 
-        self.w1 = nn.Parameter(embeddings.weight[:pivot], requires_grad=False)
-        self.w2 = nn.Parameter(embeddings.weight[pivot:], requires_grad=True)
+        self.frozen_embedding = nn.Embedding.from_pretrained(
+            embeddings.weight[:pivot],
+            padding_idx=self.padding_idx if self.padding_idx is not None and self.padding_idx < pivot else None,
+            max_norm=self.max_norm,
+            norm_type=self.norm_type,
+            scale_grad_by_freq=self.scale_grad_by_freq,
+            sparse=self.sparse,
+            freeze=True
+        )
 
-        self._register_load_state_dict_pre_hook(_load_state_dict_pre_hook)
-        self._register_state_dict_hook(_state_dict_hook)
-
+        self.trainable_embedding = nn.Embedding.from_pretrained(
+            embeddings.weight[:pivot],
+            padding_idx=self.padding_idx - self.pivot if self.padding_idx is not None and self.padding_idx >= pivot else None,
+            max_norm=self.max_norm,
+            norm_type=self.norm_type,
+            scale_grad_by_freq=self.scale_grad_by_freq,
+            sparse=self.sparse,
+            freeze=False
+        )
+    
     def forward(self, x: LongTensor):
         mask = x < self.pivot
-        e = torch.empty(*x.shape, self.embedding_dim, device=self.w1.device, dtype=self.w1.dtype)
-        e[mask] = F.embedding(x[mask], self.w1, self.padding_idx, self.max_norm, self.norm_type, self.scale_grad_by_freq, self.sparse)
-        e[~mask] = F.embedding(x[~mask] - self.pivot, self.w2, None, self.max_norm, self.norm_type, self.scale_grad_by_freq, self.sparse)
+        e = torch.empty(*x.shape, self.embedding_dim, device=self.trainable_embedding.weight.device, dtype=self.trainable_embedding.weight.dtype)
+        e[mask] = self.frozen_embedding(x[mask]).to(e.device, e.dtype)
+        e[~mask] = self.trainable_embedding(x[~mask] - self.pivot)
         return e

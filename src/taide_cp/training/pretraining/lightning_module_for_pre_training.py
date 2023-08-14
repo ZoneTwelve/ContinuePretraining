@@ -25,23 +25,22 @@ class _BatchType(TypedDict):
     labels: torch.Tensor
 
 
-InitializingStrategy = Literal[None, 'mean', 'sample']
-FreezingStrategy = Literal[None, 'exclude_new', 'exclude_all']
+InitializingStrategy = Literal['mean', 'sample']
+FreezingStrategy = Literal['exclude_new', 'exclude_all']
 
 
 def tie_partially_frozen_weights(model: PreTrainedModel):
     if getattr(model.config, 'tie_word_embeddings'):
         input_embeddings: PartiallyFrozenEmbedding = model.get_input_embeddings()
         output_embeddings: PartiallyFrozenLinear = model.get_output_embeddings()
-        output_embeddings.w1 = input_embeddings.w1
-        output_embeddings.w2 = input_embeddings.w2
-
+        output_embeddings.frozen_linear.weight = input_embeddings.frozen_embedding.weight
+        output_embeddings.trainable_linear.weight = input_embeddings.trainable_embedding.weight
 
 def extend_tokens(
     model: PreTrainedModel,
     new_num_tokens: int,
-    initializing_strategy: InitializingStrategy = None,
-    freeze_old: bool = False,
+    initializing_strategy: InitializingStrategy | None = None,
+    freezing_strategy: FreezingStrategy | None = None,
 ):
     old_num_tokens = model.config.vocab_size
     model.resize_token_embeddings(new_num_tokens)
@@ -56,11 +55,15 @@ def extend_tokens(
         input_embeddings.weight.data[old_num_tokens:].copy_(input_embeddings.weight.data[mask])
         output_embeddings.weight.data[old_num_tokens:].copy_(output_embeddings.weight.data[mask])
 
-    if freeze_old:
+    if freezing_strategy == 'exclude_new':
+        model.requires_grad_(False)
         model.set_input_embeddings(PartiallyFrozenEmbedding(input_embeddings, old_num_tokens))
         model.set_output_embeddings(PartiallyFrozenLinear(output_embeddings, old_num_tokens))
         tie_partially_frozen_weights(model)
-
+    elif freezing_strategy == 'exclude_all':
+        model.requires_grad_(False)
+        model.get_input_embeddings().requires_grad_(True)
+        model.get_output_embeddings().requires_grad_(True)
 
 class LightningModuleForPreTraining(LightningModuleX):
     model_class: Optional[Type[PreTrainedModel]] = None
@@ -80,12 +83,13 @@ class LightningModuleForPreTraining(LightningModuleX):
         model_path: str,
         tokenizer_path: Optional[str] = None,
         extend_tokens: bool = False,
-        initializing_strategy: InitializingStrategy = None,
-        freezing_strategy: FreezingStrategy = None,
+        initializing_strategy: InitializingStrategy | None = None,
+        freezing_strategy: FreezingStrategy | None = None,
         max_length: int = 2048,
         lr: Optional[float] = 1e-5,
         # optimizer: Literal['adamw', 'lion'] = 'adamw',
         betas: Optional[Tuple[float, float]] = (0.9, 0.95),
+        eps: float = 1e-8,
         weight_decay: Optional[float] = 1e-1,
         lr_scheduler_type: Literal[None, 'linear', 'cosine'] = None,
         num_warmup_steps: int = 0,
@@ -112,6 +116,7 @@ class LightningModuleForPreTraining(LightningModuleX):
 
         self.lr = lr
         self.betas = betas
+        self.eps = eps
         self.weight_decay = weight_decay
         self.lr_scheduler_type = lr_scheduler_type
         self.num_warmup_steps = num_warmup_steps
@@ -179,7 +184,13 @@ class LightningModuleForPreTraining(LightningModuleX):
         if isinstance(self.strategy, DeepSpeedStrategy):
             optimizer_cls = DeepSpeedCPUAdam if self.strategy.is_using_offload else FusedAdam
 
-        optimizer_config['optimizer'] = optimizer_cls(parameters, lr=self.lr, betas=self.betas, weight_decay=self.weight_decay)
+        optimizer_config['optimizer'] = optimizer_cls(
+            [p for p in self.parameters() if p.requires_grad],
+            lr=self.lr,
+            betas=self.betas,
+            eps=self.eps,
+            weight_decay=self.weight_decay
+        )
         optimizer_config['lr_scheduler'] = {
             'scheduler': get_lr_scheduler(
                 scheduler_type=self.lr_scheduler_type,
