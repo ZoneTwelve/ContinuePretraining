@@ -1,3 +1,4 @@
+import os
 from functools import partial
 from pathlib import Path
 from typing import Callable, Literal, Optional, Set, Tuple, Type, TypedDict
@@ -7,6 +8,8 @@ from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
 from torch import nn
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, wrap
 from torch.optim import AdamW
+from torch.optim.optimizer import Optimizer
+from torchmetrics import Metric
 from transformers import (PretrainedConfig, PreTrainedModel,
                           PreTrainedTokenizerBase)
 from transformers.modeling_utils import no_init_weights
@@ -134,16 +137,20 @@ class LightningModuleForPreTraining(LightningModuleX):
         if self._load_from_checkpoint:
             context_managers.append(no_init_weights())    
         
-        model_cls = self.model_class
-        if isinstance(self.strategy, DeepSpeedStrategy):
-            context_managers.append(self.strategy.deepspeed_init_context)
-            model_cls = self.ds_model_class or model_cls
+        kwargs = dict(
+            low_cpu_mem_usage=True,
+            config=self.config
+        )
+        if isinstance(self.trainer.strategy, DeepSpeedStrategy):
+            if self._load_from_checkpoint:
+                context_managers.append(self.trainer.strategy.ds_init_context)
+            kwargs['low_cpu_mem_usage'] = not self.trainer.strategy.zero_stage_3
 
         if not self._load_from_checkpoint:
-            self.model: PreTrainedModel = model_cls.from_pretrained(self.model_path, config=self.config)
+            self.model: PreTrainedModel = self.model_class.from_pretrained(self.model_path, **kwargs)
         else:
             with ContextManagers(context_managers):
-                self.model = model_cls(self.config)
+                self.model = self.model_class(self.config)
 
         if isinstance(self.strategy, FSDPStrategy):
             self.model = wrap(
@@ -154,36 +161,39 @@ class LightningModuleForPreTraining(LightningModuleX):
                 )
             )
 
-        if self.extend_tokens:           
+        if self.extend_tokens:
             extend_tokens(
                 self.model,
                 len(self.tokenizer),
                 initializing_strategy=self.initializing_strategy,
-                freeze_old=self.freezing_strategy == 'exclude_new',
+                freezing_strategy=self.freezing_strategy,
             )
 
-            if self.freezing_strategy == 'exclude_new':
-                self.freeze()
-                input_embeddings: PartiallyFrozenEmbedding = self.model.get_input_embeddings()
-                output_embeddings: PartiallyFrozenLinear = self.model.get_output_embeddings()
-                input_embeddings.w1.requires_grad_(False)
-                input_embeddings.w2.requires_grad_(True)
-                output_embeddings.w1.requires_grad_(False)
-                output_embeddings.w2.requires_grad_(True)
-            elif self.freezing_strategy == 'exclude_all':
-                self.freeze()
-                self.model.get_input_embeddings().requires_grad_(True)
-                self.model.get_output_embeddings().requires_grad_(True)
+        if isinstance(self.strategy, FSDPStrategy):
+            from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+            from torch.distributed.fsdp.wrap import (
+                transformer_auto_wrap_policy, wrap)
+
+            self.model: FSDP = wrap(
+                self.model,
+                auto_wrap_policy=partial(
+                    transformer_auto_wrap_policy,
+                    transformer_layer_cls={self.fsdp_transformer_layer_cls}
+                )
+            )
+        
+        for m in self.modules():
+            if isinstance(m, Metric):
+                m.to(self.strategy.root_device)
         
     def configure_optimizers(self):
         optimizer_config = {}
-        parameters = [p for p in self.parameters() if p.requires_grad]
 
         optimizer_cls = AdamW
-
         if isinstance(self.trainer.strategy, DeepSpeedStrategy):
             from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
             optimizer_cls = DeepSpeedCPUAdam if self.trainer.strategy.offload_optimizer else FusedAdam
+
         optimizer_config['optimizer'] = optimizer_cls(
             [p for p in self.parameters() if p.requires_grad],
             lr=self.lr,
@@ -204,6 +214,32 @@ class LightningModuleForPreTraining(LightningModuleX):
 
         return optimizer_config
     
+    def configure_gradient_clipping(
+        self,
+        optimizer: Optimizer,
+        gradient_clip_val: int | float | None = None,
+        gradient_clip_algorithm: str | None = None
+    ) -> None:
+
+        if isinstance(self.strategy, FSDPStrategy):
+            assert gradient_clip_algorithm in ('norm', None), gradient_clip_algorithm
+            self.model.clip_grad_norm_(gradient_clip_val)
+        else:
+            self.clip_gradients(
+                optimizer,
+                gradient_clip_val=gradient_clip_val,
+                gradient_clip_algorithm=gradient_clip_algorithm
+            )
+
+    def compute_loss(self, batch: _BatchType) -> torch.Tensor:
+        output = self.model(
+            input_ids=batch['input_ids'],
+            attention_mask=batch['attention_mask'],
+            labels=batch['labels'],
+            use_cache=False,
+        )
+        return output.loss.float()
+    
     def on_train_start(self) -> None:
         self.model.gradient_checkpointing_enable()
 
@@ -214,20 +250,13 @@ class LightningModuleForPreTraining(LightningModuleX):
 
     def training_step(self, batch: _BatchType, batch_idx: int):
         batch_size = batch['input_ids'].size(0)
-        output = self.model(
-            input_ids=batch['input_ids'],
-            attention_mask=batch['attention_mask'],
-            labels=batch['labels'],
-            use_cache=False,
-        )
-        loss = output.loss
+        loss = self.compute_loss(batch)
 
         self.log('loss', loss, prog_bar=True, logger=False)
-
         self.log('Loss/Train/Step', loss)
         self.log('Loss/Train', loss, on_step=False, on_epoch=True, sync_dist=True, batch_size=batch_size)
-        self.train_perplexity.update(loss, batch['labels'], by_loss=True)
-        self.batch_perplexity.update(loss, batch['labels'], by_loss=True)
+        self.train_perplexity.update(loss, batch['labels'])
+        self.batch_perplexity.update(loss, batch['labels'])
         self.log('Perplexity/Train/Step', self.batch_perplexity.compute())
         self.batch_perplexity.reset()
         return loss
@@ -243,17 +272,88 @@ class LightningModuleForPreTraining(LightningModuleX):
 
     def validation_step(self, batch: _BatchType, batch_idx: int, dataloader_idx: int = 0):
         batch_size = batch['input_ids'].size(0)
-        output = self.model(
-            input_ids=batch['input_ids'],
-            attention_mask=batch['attention_mask'],
-            labels=batch['labels'],
-        )
-        loss = output.loss
-        self.val_perplexity.update(loss, batch['labels'], by_loss=True)
-        
+        loss = self.compute_loss(batch)
+
+        self.val_perplexity.update(loss, batch['labels'])
         self.log('loss', loss, prog_bar=True, logger=False, sync_dist=True)
         self.log('Loss/Val', loss, sync_dist=True)
         self.log('Perplexity/Val', self.val_perplexity, batch_size=batch_size, sync_dist=True)
 
     def on_validation_end(self) -> None:
         self.model.gradient_checkpointing_enable()
+
+    @staticmethod
+    def convert_to_hf(
+        checkpoint_path: str,
+        model_path: str | None = None,
+        tokenizer_path: str | None = None,
+        dtype: torch.dtype = torch.half
+    ) -> tuple[PreTrainedTokenizerBase, PreTrainedModel]:
+        from accelerate import init_empty_weights
+
+        from ...models import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+        from ...utils.deepspeed import \
+            get_lightning_checkpoint_from_zero_checkpoint
+        from ...utils.utilities import rsetattr
+        
+        def patch_state_dict(state_dict: dict[str, torch.Tensor]):
+            return {k.removeprefix('model.'): v for k, v in state_dict.items()}
+
+        def patch_partial_embeddings(model: PreTrainedModel, state_dict: dict[str, torch.Tensor]):
+            new_state_dict: dict[str, torch.Tensor] = {}
+            for k, v in state_dict.items():
+                if k.endswith('.w1') or k.endswith('frozen_embedding.weight') or k.endswith('frozen_linear.weight'):
+                    continue
+
+                if k.endswith('.w2') or k.endswith('trainable_embedding.weight') or k.endswith('trainable_linear.weight'):
+                    new_key = k.replace('.w2', '.weight').replace('.trainable_embedding', '').replace('.trainable_linear', '')
+                    old_embeddings = model.get_parameter(new_key).data
+                    num_old_embeddings = old_embeddings.size(0)
+                    num_embeddings = num_old_embeddings + v.size(0)
+                    embedding_size = v.size(1)
+                    x = torch.empty(num_embeddings, embedding_size)
+                    x[:num_old_embeddings].copy_(old_embeddings)
+                    x[num_old_embeddings:].copy_(v)
+                    k, v = new_key, x
+                new_state_dict[k] = v
+            return new_state_dict
+
+        def load_state_dict(model: PreTrainedModel, state_dict: dict[str, torch.Tensor]):
+            for k, v in state_dict.items():
+                rsetattr(model, k, torch.nn.Parameter(v))
+            model.tie_weights()
+            return model
+
+        if os.path.isdir(checkpoint_path):
+            checkpoint = get_lightning_checkpoint_from_zero_checkpoint(checkpoint_path, dtype=dtype)
+        else:
+            checkpoint = torch.load(checkpoint_path, 'cpu')
+
+        hyper_parameters = checkpoint['hyper_parameters']
+        model_path = model_path or hyper_parameters['model_path']
+        tokenizer_path = tokenizer_path or hyper_parameters['tokenizer_path'] or model_path
+
+        state_dict = patch_state_dict(checkpoint['state_dict'])
+        
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+        config = AutoConfig.from_pretrained(hyper_parameters['model_path'])
+
+        with init_empty_weights():
+            model = AutoModelForCausalLM.from_config(config)
+
+        if hyper_parameters['extend_tokens']:
+            model.resize_token_embeddings(len(tokenizer))
+
+            if hyper_parameters['freezing_strategy'] is not None:
+                model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype='auto', low_cpu_mem_usage=True, config=config)
+
+                if hyper_parameters['freezing_strategy'] == 'exclude_new':
+                    state_dict = patch_partial_embeddings(model, state_dict)
+    
+        model = load_state_dict(model, state_dict)
+        model.to(model.dtype)
+        
+        if 'pad_token' in tokenizer.special_tokens_map:
+            model.config.pad_token_id = tokenizer.pad_token_id
+
+        return tokenizer, model
