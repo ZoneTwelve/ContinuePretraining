@@ -7,7 +7,7 @@ from datasets import (Dataset, concatenate_datasets, load_dataset,
 from tqdm.auto import tqdm
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerBase
 
-from ...utils import DatasetsContextManager, disable_output
+from ...utils import DatasetsContextManager
 from ..datamodule import LightningDataModuleX, StageType
 from .datacollator_for_pre_training import DataCollatorForPreTraining
 
@@ -16,17 +16,18 @@ from .datacollator_for_pre_training import DataCollatorForPreTraining
 def load_datasets(data_path: str) -> Dataset:
     datasets = []
     paths = []
-    if os.path.isfile(data_path):
-        paths = [data_path]
-    else:
+    if os.path.isdir(data_path):
         paths = glob.glob(os.path.join(data_path, '**/*.*'), recursive=True)
         paths = list(filter(lambda p: os.path.isfile(p), paths))
+    else:
+        paths = [data_path]
 
     progress = tqdm(total=len(paths), desc='Loading Files', leave=False)
-    for p in paths:       
-        with disable_output():
+    for p in paths:
+        if os.path.isfile(p):
             x = load_dataset('json', data_files=p)['train']
-
+        else:
+            x = load_dataset(p)['train']
         datasets.append(x)
         progress.update()
 
@@ -150,3 +151,15 @@ class DataModuleForPreTraining(LightningDataModuleX):
     def setup(self, stage: Optional[StageType] = None) -> None:
         self.dataset = load_from_disk(self.rearranged_dataset_path)
         self.dataset = self.split(self.dataset)
+
+    def count_tokens(self, tokenized_dataset: Dataset | None = None):
+        if tokenized_dataset is None:
+            tokenized_dataset = load_from_disk(self.tokenized_dataset_path)
+
+        dataset = tokenized_dataset.map(
+            lambda x: {'num_tokens': len(x['input_ids'])},
+            remove_columns=tokenized_dataset.column_names,
+            num_proc=self.num_proc
+        )
+        num_tokens = sum(l for l in dataset['num_tokens'])
+        return num_tokens

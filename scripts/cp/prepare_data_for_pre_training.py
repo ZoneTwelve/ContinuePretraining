@@ -22,6 +22,8 @@ def main(
         num_proc=num_proc,
     )
     datamodule.prepare_data()
+    num_tokens = datamodule.count_tokens()
+    print(f'Total Tokens: {num_tokens}')
 
 
 if __name__ == '__main__':

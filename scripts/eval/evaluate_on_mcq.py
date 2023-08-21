@@ -19,6 +19,8 @@ class LightningModuleForMultipleChoiceQuestion(LightningModuleX):
     def __init__(self, model_path: str) -> None:
         super().__init__()
 
+        self.save_hyperparameters()
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
             torch_dtype='auto',
