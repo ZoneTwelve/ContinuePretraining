@@ -181,9 +181,9 @@ class LightningModuleForPreTraining(LightningModuleX):
 
         optimizer_cls = AdamW
 
-        if isinstance(self.strategy, DeepSpeedStrategy):
-            optimizer_cls = DeepSpeedCPUAdam if self.strategy.is_using_offload else FusedAdam
-
+        if isinstance(self.trainer.strategy, DeepSpeedStrategy):
+            from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
+            optimizer_cls = DeepSpeedCPUAdam if self.trainer.strategy.offload_optimizer else FusedAdam
         optimizer_config['optimizer'] = optimizer_cls(
             [p for p in self.parameters() if p.requires_grad],
             lr=self.lr,

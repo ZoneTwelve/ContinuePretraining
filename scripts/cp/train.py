@@ -1,8 +1,10 @@
+import logging
+
 import fire
+import multiprocess
 
 from taide_cp.utils import SLURM
 from taide_cp.utils.scripting import *
-import multiprocess
 
 
 @entry_point(
@@ -21,7 +23,8 @@ def main(
                                              LearningRateMonitor,
                                              ModelCheckpoint)
 
-    from taide_cp.lightning import DeepSpeedStrategy
+    from taide_cp.lightning import (DeepSpeedSkippedStepsCallback,
+                                    DeepSpeedStrategy)
 
     multiprocess.set_start_method('spawn')
     
@@ -34,32 +37,41 @@ def main(
         **kwargs
     )
 
-    trainer = get_trainer(
-        strategy=DeepSpeedStrategy(
-            stage=3,
-            offload_optimizer=True,
-            offload_parameters=True,
-            pin_memory=True,
+    strategy = DeepSpeedStrategy(
+        stage=2,
+        logging_batch_size_per_gpu=datamodule.batch_size['train'],
+        logging_level=logging.ERROR,
+    )
+
+    callbacks = [
+        LearningRateMonitor(),
+        EarlyStopping(monitor='Perplexity/Val'),
+        ModelCheckpoint(
+            save_on_train_epoch_end=True,
+            save_top_k=-1
         ),
-        logger=get_logger(**kwargs),
-        callbacks=[
-            LearningRateMonitor(),
-            EarlyStopping(monitor='Perplexity/Val'),
-            ModelCheckpoint(
-                monitor='epoch',
-                mode='max',
-                filename='e{epoch}',
-                auto_insert_metric_name=False,
-                save_on_train_epoch_end=True,
-                save_top_k=-1
-            ),
-            ModelCheckpoint(
-                monitor='Perplexity/Val',
-                auto_insert_metric_name=False,
-                # filename='ppl={Perplexity/Val:.2f}',
-                filename='s{step}',
-            )
-        ],
+        ModelCheckpoint(
+            save_top_k=1,
+            save_weights_only=True,
+            every_n_train_steps=500,
+        ),
+        ModelCheckpoint(
+            monitor='Perplexity/Val',
+            auto_insert_metric_name=False,
+            filename='epoch={epoch}-step={step}-ppl={Perplexity/Val:.2f}',
+        ),
+    ]
+
+    if isinstance(strategy, DeepSpeedStrategy):
+        callbacks += [DeepSpeedSkippedStepsCallback()]
+
+    logger = get_logger(**kwargs)
+    logger.experiment.log_code('.')
+
+    trainer = get_trainer(
+        strategy=strategy,
+        logger=logger,
+        callbacks=callbacks,
         **kwargs,
     )
 
