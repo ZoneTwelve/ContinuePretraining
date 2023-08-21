@@ -4,9 +4,7 @@ from pathlib import Path
 from typing import Callable, Literal, Optional, Set, Tuple, Type, TypedDict
 
 import torch
-from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
 from torch import nn
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, wrap
 from torch.optim import AdamW
 from torch.optim.optimizer import Optimizer
 from torchmetrics import Metric

@@ -1,10 +1,12 @@
 import logging
 from functools import wraps
 from inspect import Parameter, _ParameterKind, signature
-from typing import Callable, Iterable, Optional, Union
+from typing import Callable, Iterable, Optional, Union, TypeVar
+
 
 __all__ = ['component', 'use', 'entry_point']
 
+_T = TypeVar('_T')
 
 IGNORED_KEYWORDS_ON_ENTRY_POINT_ATTR_NAME = '__ignored_keywords_on_entry_point__'
 
@@ -17,7 +19,7 @@ def has_kind(parameters: Iterable[Parameter], kinds: Union[_ParameterKind, Itera
     return False
 
 def component(ignored_keywords_on_entry_point: Optional[Iterable[str]] = None):
-    def decorator(func):
+    def decorator(func: _T) -> _T:
         @wraps(func)
         def wrapper(*args, **kwargs):
             parameters = signature(func).parameters

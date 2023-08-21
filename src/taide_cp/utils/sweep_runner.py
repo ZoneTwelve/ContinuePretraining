@@ -8,11 +8,12 @@ from typing import Callable, Optional
 
 import flask
 import requests
+
 import wandb
 
 from .slurm import SLURM
 
-__all__ = ['SweepRunner', 'SweepRunnerState']
+__all__ = ['SweepRunner', 'SweepRunnerState', 'create_entry_point']
 
 class SweepRunnerState(IntEnum):
     PENDING = auto()
@@ -28,7 +29,12 @@ class SweepRunner:
     def address(self):
         return f'http://{self.host}:{self.port}'
 
-    def __init__(self, host: Optional[str] = None, port: Optional[int] = None, port_offset: int = 10000) -> None:
+    def __init__(
+        self,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        port_offset: int = 10000,
+    ) -> None:
         self.host = host or SLURM.get_host()
         self.port = port or SLURM.get_port(port_offset)
 
@@ -73,8 +79,8 @@ class SweepRunner:
         state = requests.get(f'{self.address}').json()
         self.__dict__.update(state)
 
-    def agent_function(self, function: Callable[..., None]):
-        run = wandb.init()
+    def agent_function(self, function: Callable[..., None], save_dir: Optional[str] = None):
+        run = wandb.init(dir=save_dir)
 
         self.config = dict(run.config)
         self.state = SweepRunnerState.READY
@@ -86,9 +92,9 @@ class SweepRunner:
 
         function(**self.config)
 
-    def run(self, sweep_id: int, function: Callable[..., None], count: Optional[int] = None):
+    def run(self, sweep_id: int, function: Callable[..., None], count: Optional[int] = None, save_dir: Optional[str] = None):
         if SLURM.global_rank == 0:
-            wandb.agent(sweep_id, function=partial(self.agent_function, function), count=count)
+            wandb.agent(sweep_id, function=partial(self.agent_function, function, dir=save_dir), count=count)
             self.state = SweepRunnerState.FINISHED
         else:
             self.wait_for_server()
@@ -103,3 +109,9 @@ class SweepRunner:
                 elif self.state == SweepRunnerState.READY:
                     self.set_ready()
                     function(**self.config)
+
+def create_entry_point(function: Callable[..., None], **kwargs):
+    def entry_point(sweep_id: str, count: int = -1, save_dir: str = 'logs'):
+        runner = SweepRunner(**kwargs)
+        runner.run(sweep_id, function, count, save_dir)
+    return entry_point

@@ -159,6 +159,7 @@ def get_trainer(
     enable_checkpointing: Optional[bool] = None,
     accumulate_grad_batches: int = 1,
     gradient_clip_val: Optional[Union[int, float]] = 1.0,
+    detect_anomaly: bool = False,
     plugins: Optional[Union["PLUGIN_INPUT", List["PLUGIN_INPUT"]]] = None,
     default_root_dir: Optional["_PATH"] = None,
 ):
@@ -196,6 +197,7 @@ def get_trainer(
         enable_checkpointing=enable_checkpointing,
         accumulate_grad_batches=accumulate_grad_batches,
         gradient_clip_val=gradient_clip_val,
+        detect_anomaly=detect_anomaly,
         plugins=plugins,
-        default_root_dir=default_root_dir
+        default_root_dir=default_root_dir,
     )
