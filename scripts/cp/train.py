@@ -25,7 +25,7 @@ def main(
 
     from taide_cp.lightning import (DeepSpeedSkippedStepsCallback,
                                     DeepSpeedStrategy,
-                                    ResumeDataloaderCallback)
+                                    ResumeDataLoaderCallback)
 
     multiprocess.set_start_method('spawn')
     
@@ -45,7 +45,7 @@ def main(
     )
 
     callbacks = [
-        ResumeDataloaderCallback(),
+        ResumeDataLoaderCallback(),
         LearningRateMonitor(),
         EarlyStopping(monitor='Perplexity/Val'),
         ModelCheckpoint(

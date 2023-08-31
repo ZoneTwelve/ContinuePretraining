@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import _BaseDataLoaderIter
 
 
-class ResumableDataloader(DataLoader):
+class ResumableDataLoader(DataLoader):
     @property
     def current_step(self):
         if not hasattr(self, '_current_step'):
@@ -24,7 +24,7 @@ class ResumableDataloader(DataLoader):
         return it
 
 
-class ResumeDataloaderCallback(Callback):
+class ResumeDataLoaderCallback(Callback):
     def _reload_dataloader(self, trainer: Trainer):
         trainer.fit_loop._combined_loader = None
         trainer.fit_loop.setup_data()

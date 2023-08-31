@@ -10,7 +10,7 @@ from datasets import (Dataset, DatasetDict, get_dataset_config_info,
 from torch.utils.data import DataLoader, Dataset
 from transformers import PreTrainedTokenizerBase
 
-from ..lightning import ResumableDataloader
+from ..lightning import ResumableDataLoader
 from ..utils import SLURM, DatasetsContextManager, cpu_count
 from .datacollator import DataCollator
 
@@ -172,7 +172,7 @@ class LightningDataModuleX(L.LightningDataModule):
 
     def train_dataloader(self):
         if 'train' in self.dataset:
-            dataloader = ResumableDataloader(
+            dataloader = ResumableDataLoader(
                 self.dataset['train'],
                 batch_size=self.batch_size['train'],
                 pin_memory=self.pin_memory,
