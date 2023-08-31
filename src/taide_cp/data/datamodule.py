@@ -7,14 +7,16 @@ from typing import Any, Dict, Literal, Mapping, Optional, Type, Union
 import lightning as L
 from datasets import (Dataset, DatasetDict, get_dataset_config_info,
                       load_dataset, load_from_disk)
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from transformers import PreTrainedTokenizerBase
 
+from ..lightning import ResumableDataloader
 from ..utils import SLURM, DatasetsContextManager, cpu_count
 from .datacollator import DataCollator
 
 StageType = Literal['fit', 'validate', 'test', 'predict']
 SplitType = Literal['train', 'val', 'test', 'pred']
+
 
 STAGE2SPLIT: Mapping[StageType, SplitType] = {
     'fit': 'train',
@@ -23,11 +25,13 @@ STAGE2SPLIT: Mapping[StageType, SplitType] = {
     'predict': 'pred',
 }
 
+
 def get_random_dir_path(seed: Optional[int] = None):
     s = 'abcdefghijklmnopqrstuvwxyz0123456789_'
     r = random.Random(seed)
     name = 'tmp' + ''.join(r.choice(s) for _ in range(8))
     return os.path.join(gettempdir(), name)
+
 
 class LightningDataModuleX(L.LightningDataModule):
     datacollator_cls: Optional[Type[DataCollator]] = None
@@ -168,7 +172,7 @@ class LightningDataModuleX(L.LightningDataModule):
 
     def train_dataloader(self):
         if 'train' in self.dataset:
-            return DataLoader(
+            dataloader = ResumableDataloader(
                 self.dataset['train'],
                 batch_size=self.batch_size['train'],
                 pin_memory=self.pin_memory,
@@ -176,8 +180,8 @@ class LightningDataModuleX(L.LightningDataModule):
                 collate_fn=self.datacollator,
                 shuffle=True,
             )
-        
-        return super().train_dataloader()
+            dataloader.current_step = self.trainer.fit_loop.batch_idx
+            return dataloader
 
     def val_dataloader(self):
         if 'val' in self.dataset:
@@ -190,8 +194,6 @@ class LightningDataModuleX(L.LightningDataModule):
                 shuffle=False,
             )
         
-        return super().val_dataloader()
-        
     def test_dataloader(self):
         if 'test' in self.dataset:
             return DataLoader(
@@ -202,7 +204,6 @@ class LightningDataModuleX(L.LightningDataModule):
                 collate_fn=self.datacollator,
                 shuffle=False,
             )
-        return super().test_dataloader()
     
     def predict_dataloader(self):
         if 'predict' in self.dataset:
@@ -214,7 +215,6 @@ class LightningDataModuleX(L.LightningDataModule):
                 collate_fn=self.datacollator,
                 shuffle=False,
             )
-        return super().predict_dataloader()
     
     def teardown(self, stage: Optional[StageType] = None) -> None:
         if self.cleanup_dataset_path:
