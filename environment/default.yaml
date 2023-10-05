@@ -1,0 +1,36 @@
+name: taide-cp
+channels:
+  - nvidia/label/cuda-11.8.0
+dependencies:
+  - python=3.10
+  - pip
+  - pytorch::pytorch
+  - pytorch::pytorch-cuda=11.8
+  - cuda
+  - conda-forge::bash-completion
+  - conda-forge::cmake
+  - conda-forge::cxx-compiler
+  - conda-forge::gcc=8
+  - conda-forge::pkg-config
+  - pip:
+    - accelerate
+    - auto-gptq
+    - datasets
+    - deepspeed
+    - fire
+    - ipykernel
+    - ipywidgets
+    - jsonargparse[signatures]
+    - lightning
+    - omegaconf
+    - optimum
+    - peft
+    - protobuf
+    - safetensors
+    - sentencepiece
+    - tokenizers
+    - transformers
+    - wandb
+    - -e ..
+variables:
+  HF_HOME: .cache

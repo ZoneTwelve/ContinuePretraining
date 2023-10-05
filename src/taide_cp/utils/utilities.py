@@ -15,7 +15,6 @@ __all__ = [
     'DatasetsContextManager',
     'ContextManagers',
     'parse_ev',
-    'copy_callable_signature',
     'cpu_count',
     'disable_output',
 ]
@@ -112,17 +111,6 @@ class DatasetsContextManager(ContextDecorator):
 def parse_ev(type_: Type[T1], ev_name: str, default: T2 = None) -> Union[T1, T2]:
     ev = os.environ.get(ev_name)
     return type_(ev) if ev is not None else default
-
-
-def copy_callable_signature(
-    source: Callable[P, T1]
-) -> Callable[[Callable[..., T1]], Callable[P, T1]]:
-    def wrapper(target: Callable[..., T1]) -> Callable[P, T1]:
-        @functools.wraps(source)
-        def wrapped(*args: P.args, **kwargs: P.kwargs) -> T1:
-            return target(*args, **kwargs)
-        return wrapped
-    return wrapper
 
 def cpu_count() -> int:
     try:

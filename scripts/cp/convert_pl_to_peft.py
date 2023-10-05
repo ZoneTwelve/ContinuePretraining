@@ -1,6 +1,6 @@
 import fire
 
-from taide_cp.models import LightningModuleForPreTraining, LightningModuleForPreTrainingWithLoRA
+from taide_cp.models import LightningModuleForPreTrainingWithLoRA
 
 
 def _fix_import():
@@ -17,14 +17,14 @@ def main(
     model_path: str | None = None,
     tokenizer_path: str | None = None,
 ):
-    tokenizer, model = LightningModuleForPreTraining.convert_to_hf(
+    tokenizer, peft_model = LightningModuleForPreTrainingWithLoRA.convert_to_hf(
         checkpoint_path,
         model_path,
         tokenizer_path
     )
-    model.config.torch_dtype = 'float16'
-    model.save_pretrained(output_path, max_shard_size='1000GB', safe_serialization=True)
-    tokenizer.save_pretrained(output_path)
+    # model.config.torch_dtype = 'float16'
+    peft_model.save_pretrained(output_path, safe_serialization=True)
+    # model.save_pretrained(output_path, max_shard_size='1000GB', safe_serialization=True)
 
 if __name__ == '__main__':
     fire.Fire(main)

@@ -29,28 +29,28 @@ class LLaMAExtender(Extender):
     tokenizer: "LlamaTokenizer"
 
     def __init__(self, tokenizer: "LlamaTokenizer", pad_token: str | None) -> None:
-        from sentencepiece import sentencepiece_model_pb2 as sp_model
-
+        from transformers.utils import sentencepiece_model_pb2_new as sp_model
         self.spm = sp_model.ModelProto()
         self.spm.ParseFromString(tokenizer.sp_model.serialized_model_proto())
+        self.pieces = set(p.piece for p in self.spm.pieces)
 
         super().__init__(tokenizer, pad_token)
 
     def _add_token(self, token: str):
-        from sentencepiece import sentencepiece_model_pb2 as sp_model
-        
-        sp = sp_model.ModelProto().SentencePiece()
-        sp.piece = token
-        sp.score = 0
-        self.spm.pieces.append(sp)
+        from transformers.utils import sentencepiece_model_pb2_new as sp_model
+
+        if token not in self.pieces:
+            sp = sp_model.ModelProto().SentencePiece()
+            sp.piece = token
+            sp.score = 0
+            self.spm.pieces.append(sp)
+            self.pieces.add(token)
 
     def extend(self, tokens: list[str]):
-        s = set(p.piece for p in self.spm.pieces)
         for t in tokens:
-            if t not in s:
-                self._add_token(t)
+            self._add_token(t)
 
-    def add_pad_token(self, pad_token: str):
+    def add_pad_token(self, pad_token: str):            
         self._add_token(pad_token)
 
     def get_extended_tokenizer(self):

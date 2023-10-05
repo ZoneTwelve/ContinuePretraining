@@ -1,13 +1,10 @@
 from typing import Any, Dict, List, Union
 
-import opencc
 import torch
 import torch.nn.functional as F
 from transformers import PreTrainedTokenizerBase
 
 from ..datacollator import DataCollator
-
-t2s = opencc.OpenCC('t2s')
 
 
 def padded_stack(tensors: list[torch.Tensor],
@@ -44,10 +41,16 @@ def pad_input_ids(input_ids: list[list[int]], pad_token_id: int):
 
 
 class DataCollatorForMultipleChoiceQuestion(DataCollator):
-    def __init__(self,
-                 tokenizer: PreTrainedTokenizerBase,
-                 convert_to_chs: bool = False) -> None:
+    def __init__(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        convert_to_chs: bool = False
+    ) -> None:
         super().__init__(tokenizer)
+
+        import opencc
+
+        self.t2s = opencc.OpenCC('t2s')
 
         self.example = ''
         self.convert_to_chs = convert_to_chs
@@ -90,7 +93,7 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
         choice_context = f'{self.tokenizer.bos_token}'
 
         if self.convert_to_chs:
-            choice_context = t2s.convert(choice_context)
+            choice_context = self.t2s.convert(choice_context)
 
         for x in batch:
             question = self.get_prompt(x,
@@ -100,9 +103,9 @@ class DataCollatorForMultipleChoiceQuestion(DataCollator):
             choices = x['choices']
 
             if self.convert_to_chs:
-                question = t2s.convert(question)
-                example = t2s.convert(self.example)
-                choices = [t2s.convert(c) for c in choices]
+                question = self.t2s.convert(question)
+                example = self.t2s.convert(self.example)
+                choices = [self.t2s.convert(c) for c in choices]
 
             batch_example.append(example)
             batch_example_question.append(example + question)

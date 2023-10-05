@@ -1,0 +1,93 @@
+import os
+from typing import Literal, Optional
+
+import fire
+from sentencepiece import SentencePieceTrainer
+
+from taide_cp.data.pre_training.datamodule_for_pre_training import load_datasets
+
+
+def main(
+    data_path: str,
+    model_prefix: str,
+    model_type: Literal['unigram', 'bpe', 'char', 'word'] = 'bpe',
+    vocab_size: int = 32000,
+    self_test_sample_size: int = 0,
+    input_format: str = 'text',
+    character_coverage: float = 0.9995,
+    input_sentence_size: int = 500000000,
+    seed_sentencepiece_size: int = 1000000,
+    shrinking_factor: float = 0.75,
+    num_threads: Optional[int] = None,
+    num_sub_iterations: int = 2,
+    max_sentence_length: int = 4192,
+    shuffle_input_sentence: bool = True,
+    max_sentencepiece_length: int = 16,
+    split_by_unicode_script: bool = True,
+    split_by_whitespace: bool = True,
+    split_by_number: bool = True,
+    treat_whitespace_as_suffix: bool = False,
+    split_digits: bool = True,
+    vocabulary_output_piece_score: bool = True,
+    hard_vocab_limit: bool = True,
+    use_all_vocab: bool = False,
+    byte_fallback: bool = True,
+    required_chars: str = '',
+    unk_id: int = 0,
+    bos_id: int = 1,
+    eos_id: int = 2,
+    pad_id: int = -1,
+    unk_surface: str = ' \342\201\207 ',
+    unk_piece: str = '<unk>',
+    bos_piece: str = '<s>',
+    eos_piece: str = '</s>',
+    pad_piece: str = '<pad>',
+    train_extremely_large_corpus: bool = True,
+    normalization_rule_name: str = 'nmt_nfkc',
+    add_dummy_prefix: bool = True,
+    remove_extra_whitespaces: bool = False,
+):
+    num_threads = num_threads or os.cpu_count()
+    SentencePieceTrainer.Train(
+        sentence_iterator=(x['text'] for x in load_datasets(data_path)),
+        model_prefix=model_prefix,
+        model_type=model_type,
+        vocab_size=vocab_size,
+        self_test_sample_size=self_test_sample_size,
+        input_format=input_format,
+        character_coverage=character_coverage,
+        input_sentence_size=input_sentence_size,
+        seed_sentencepiece_size=seed_sentencepiece_size,
+        shrinking_factor=shrinking_factor,
+        num_threads=num_threads,
+        num_sub_iterations=num_sub_iterations,
+        max_sentence_length=max_sentence_length,
+        shuffle_input_sentence=shuffle_input_sentence,
+        max_sentencepiece_length=max_sentencepiece_length,
+        split_by_unicode_script=split_by_unicode_script,
+        split_by_whitespace=split_by_whitespace,
+        split_by_number=split_by_number,
+        treat_whitespace_as_suffix=treat_whitespace_as_suffix,
+        split_digits=split_digits,
+        vocabulary_output_piece_score=vocabulary_output_piece_score,
+        hard_vocab_limit=hard_vocab_limit,
+        use_all_vocab=use_all_vocab,
+        byte_fallback=byte_fallback,
+        required_chars=required_chars,
+        train_extremely_large_corpus=train_extremely_large_corpus,
+        unk_id=unk_id,
+        bos_id=bos_id,
+        eos_id=eos_id,
+        pad_id=pad_id,
+        unk_surface=unk_surface,
+        unk_piece=unk_piece,
+        bos_piece=bos_piece,
+        eos_piece=eos_piece,
+        pad_piece=pad_piece,
+        normalization_rule_name=normalization_rule_name,
+        add_dummy_prefix=add_dummy_prefix,
+        remove_extra_whitespaces=remove_extra_whitespaces,
+    )
+
+if __name__ == '__main__':
+    fire.Fire(main)

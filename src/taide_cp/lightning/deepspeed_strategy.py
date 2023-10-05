@@ -9,7 +9,7 @@ from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.strategies.deepspeed import (DeepSpeedStrategy,
                                                     warning_cache)
 from lightning.pytorch.utilities.types import STEP_OUTPUT
-from transformers.deepspeed import HfDeepSpeedConfig
+from transformers.integrations import HfDeepSpeedConfig
 
 from ..utils.deepspeed import get_lightning_checkpoint_from_zero_checkpoint
 
@@ -21,13 +21,17 @@ class DeepSpeedSkippedStepsCallback(Callback):
         self.raise_error_at_min_scale = raise_error_at_min_scale
 
     def on_train_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
-        assert isinstance(trainer.strategy, DeepSpeedStrategy)
+        if not isinstance(trainer.strategy, DeepSpeedStrategy):
+            return
+        
         loss_scaler = trainer.strategy.deepspeed_engine.optimizer.loss_scaler
         if self.raise_error_at_min_scale is not None:
             loss_scaler.raise_error_at_min_scale = self.raise_error_at_min_scale
 
     def on_train_batch_end(self, trainer: L.Trainer, pl_module: L.LightningModule, outputs: STEP_OUTPUT, batch: Any, batch_idx: int) -> None:
-        assert isinstance(trainer.strategy, DeepSpeedStrategy)
+        if not isinstance(trainer.strategy, DeepSpeedStrategy):
+            return
+        
         trainer.progress_bar_metrics['skipped_steps'] = trainer.strategy.deepspeed_engine.skipped_steps
 
 
