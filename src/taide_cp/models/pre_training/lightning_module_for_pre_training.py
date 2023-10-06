@@ -51,7 +51,7 @@ def extend_tokens(
     training_strategy: TrainingStrategy,
 ):
     import deepspeed
-    from transformers.deepspeed import is_deepspeed_zero3_enabled
+    from transformers.integrations import is_deepspeed_zero3_enabled
 
     old_num_tokens = model.config.vocab_size
     model.resize_token_embeddings(new_num_tokens)
