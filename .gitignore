@@ -4,8 +4,8 @@
 /checkpoints/*
 /repos/
 /outputs/
+/temp*
 
-temp*
 slurm-*.out
 
 !/**/.gitkeep
