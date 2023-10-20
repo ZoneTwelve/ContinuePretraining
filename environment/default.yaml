@@ -11,6 +11,7 @@ dependencies:
   - conda-forge::cmake
   - conda-forge::cxx-compiler
   - conda-forge::gcc=8
+  - conda-forge::git-lfs
   - conda-forge::pkg-config
   - pip:
     - accelerate
@@ -32,5 +33,3 @@ dependencies:
     - transformers
     - wandb
     - -e ..
-variables:
-  HF_HOME: .cache
