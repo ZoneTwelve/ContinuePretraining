@@ -2,9 +2,10 @@
 /data/*
 /logs/*
 /checkpoints/*
-/repos/
-/outputs/
 /temp*
+
+config/*
+!config/example.yaml
 
 slurm-*.out
 
