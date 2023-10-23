@@ -9,6 +9,7 @@ from lightning.pytorch.cli import (LightningArgumentParser, LightningCLI,
 from lightning.pytorch.loggers import WandbLogger
 
 from taide_cp.data import *
+from taide_cp.lightning import *
 from taide_cp.models import *
 from taide_cp.patchers import *
 from taide_cp.utils.slurm import SLURM
@@ -93,18 +94,19 @@ class SaveConfigCallbackX(SaveConfigCallback):
         self.already_saved = trainer.strategy.broadcast(self.already_saved)
 
 
-class LightningCLIX(LightningCLI):  
+class CustomLightningCLI(LightningCLI):  
     def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
-        from taide_cp.lightning import (DeepSpeedSkippedStepsCallback,
-                                        ResumeDataLoaderCallback)
+        from taide_cp.lightning import ResumeDataLoaderCallback
 
         # parser.link_arguments('model.init_args.config.max_length', 'data.init_args.config.max_length')
-        parser.link_arguments('data.init_args.config.train_batch_size', 'trainer.strategy.init_args.logging_batch_size_per_gpu')
-        parser.link_arguments('model.tokenizer', 'data.init_args.tokenizer', apply_on='instantiate')
+        # parser.link_arguments('data.init_args.config.train_batch_size', 'trainer.strategy.init_args.logging_batch_size_per_gpu')
+        # parser.link_arguments('model.tokenizer', 'data.init_args.tokenizer', apply_on='instantiate')
+
+        parser.link_arguments('data.init_args.config.batch_size', 'trainer.strategy.init_args.logging_batch_size_per_gpu')
+        parser.link_arguments('model.tokenizer', 'data.init_args.config.tokenizer', apply_on='instantiate')
 
         parser.add_lightning_class_args(TrainingRoutineCallback, 'training_routine_callback')
         parser.add_lightning_class_args(ResumeDataLoaderCallback, 'resume_dataloader_callback')
-        parser.add_lightning_class_args(DeepSpeedSkippedStepsCallback, 'deepspeed_skipped_steps_callback')
 
     def before_instantiate_classes(self) -> None:
         config = self.config.get(self.config.subcommand)
@@ -117,7 +119,8 @@ class LightningCLIX(LightningCLI):
 
 if __name__ == '__main__':
     multiprocess.set_start_method('spawn')
-    LightningCLIX(
+    CustomLightningCLI(
         save_config_callback=SaveConfigCallbackX,
+        save_config_kwargs={'overwrite': True},
         parser_kwargs={'parser_mode': 'omegaconf'}
     )
