@@ -30,7 +30,7 @@ class ResumableDataLoader(DataLoader):
 
     def __iter__(self) -> _BaseDataLoaderIter:
         current_step = 0
-        if not self._resumed:
+        if not self._resumed and self._datamodule._current_step is not None:
             current_step = self._datamodule._current_step
             self._resumed = True
 
