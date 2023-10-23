@@ -36,6 +36,9 @@ class Patcher(ABC):
         self.patch(target, *args, **kwargs)
         return target
 
+    def __repr__(self) -> str:
+        return f'{self.__class__.__name__}()'
+
 
 class DummyPatcher(Patcher):
     def patch(self, target: T):
