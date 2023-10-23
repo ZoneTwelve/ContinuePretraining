@@ -1,7 +1,7 @@
 import inspect
 import math
 from enum import auto
-from typing import Literal, Optional
+from typing import Optional
 
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
@@ -12,7 +12,7 @@ __all__ = ['get_cosine_scheduler', 'get_linear_scheduler', 'get_warmup_scheduler
 
 
 class LearningRateSchedulerType(StrEnum):
-    NONE = auto()
+    CONSTANT = auto()
     LINEAR = auto()
     COSINE = auto()
 
@@ -59,14 +59,15 @@ def get_warmup_scheduler(
 
 
 def get_lr_scheduler(
-    scheduler_type: LearningRateSchedulerType,
+    scheduler_type: LearningRateSchedulerType | str,
     optimizer: Optimizer,
     num_warmup_steps: int = 0,
     num_training_steps: Optional[int] = None,
     min_lr_factor: Optional[float] = None,
 ):
+    scheduler_type = LearningRateSchedulerType(scheduler_type)
     mapping = {
-        LearningRateSchedulerType.NONE: get_warmup_scheduler,
+        LearningRateSchedulerType.CONSTANT: get_warmup_scheduler,
         LearningRateSchedulerType.LINEAR: get_linear_scheduler,
         LearningRateSchedulerType.COSINE: get_cosine_scheduler,
     }
