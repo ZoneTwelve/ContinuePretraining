@@ -26,7 +26,8 @@ def main(
         '--ntasks-per-node', str(ntasks_per_node),
         '--account', account,
         '--partition', partition,
-        '--pty', 'bash'
+        '--pty',
+        'bash'
     ]
 
     try:

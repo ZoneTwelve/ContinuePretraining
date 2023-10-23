@@ -1,8 +1,9 @@
-from functools import wraps
+from functools import update_wrapper
 from typing import Callable
 
 import fire
 
+
 def Fire(wrapped: Callable):
-    return wraps(wrapped)(lambda: fire.Fire(wrapped))
+    return update_wrapper(lambda: fire.Fire(wrapped), wrapped)
 

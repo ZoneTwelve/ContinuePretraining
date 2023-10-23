@@ -23,7 +23,8 @@ def main(
     account: str = os.environ.get('SLURM_DEFAULT_ACCOUNT'),
     partition: str = os.environ.get('SLURM_DEFAULT_PARTITION'),
     output: str = 'logs/slurm/%j-%x.log',
-    verbosity: int | str = logging.WARN
+    verbosity: int | str = logging.WARN,
+    attach: bool = True
 ):
     logger.setLevel(verbosity)
 
@@ -52,10 +53,14 @@ def main(
     m = re.search(r'Submitted batch job (\d+)', p.stdout.decode())
     if m:
         job_id = m[1]
+        print(job_id)
     else:
         print(p.stderr.decode())
         return
     
+    if not attach:
+        return
+
     t = time.time()
     while True:
         try:

@@ -4,7 +4,7 @@ import torch
 from deepspeed.utils.zero_to_fp32 import (
     get_fp32_state_dict_from_zero_checkpoint, get_model_state_file,
     get_optim_files)
-from lightning.pytorch.utilities.deepspeed import CPU_DEVICE, ds_checkpoint_dir
+from lightning.pytorch.utilities.deepspeed import CPU_DEVICE, ds_checkpoint_dir, convert_zero_checkpoint_to_fp32_state_dict
 
 __all__ = ['get_lightning_checkpoint_from_zero_checkpoint']
 

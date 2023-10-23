@@ -1,23 +1,8 @@
 import functools
 import json
-import logging
 import os
-from contextlib import AbstractContextManager, ContextDecorator, ExitStack, contextmanager
-import sys
-from typing import (Any, Callable, ContextManager, Dict, List, ParamSpec, Type,
-                    TypeVar, Union)
-
-__all__ = [
-    'read_json',
-    'write_json',
-    'rgetattr',
-    'rsetattr',
-    'DatasetsContextManager',
-    'ContextManagers',
-    'parse_ev',
-    'cpu_count',
-    'disable_output',
-]
+from contextlib import AbstractContextManager, ExitStack
+from typing import Any, ContextManager, List, ParamSpec, Type, TypeVar, Union
 
 T1 = TypeVar('T1')
 T2 = TypeVar('T2')
@@ -51,63 +36,6 @@ class ContextManagers(AbstractContextManager):
     def __exit__(self, __exc_type, __exc_value, __traceback):
         self.stack.close()
 
-class DatasetsContextManager(ContextDecorator):
-    @staticmethod
-    def set_caching_enabled(boolean: bool):
-        import datasets
-
-        if boolean:
-            datasets.enable_caching()
-        else:
-            datasets.disable_caching()
-
-    @staticmethod
-    def set_progress_bar_enabled(boolean: bool):
-        import datasets
-
-        if boolean:
-            datasets.enable_progress_bar()
-        else:
-            datasets.disable_progress_bar()
-
-    @classmethod
-    def get_state(cls):
-        import datasets
-        return {
-            'caching': datasets.is_caching_enabled(),
-            'progress_bar': datasets.is_progress_bar_enabled(),
-            'verbosity': datasets.logging.get_verbosity(),
-        }
-
-    @classmethod
-    def set_state(cls, state: Dict[str, Any]):
-        import datasets
-        cls.set_caching_enabled(state['caching'])
-        cls.set_progress_bar_enabled(state['progress_bar'])
-        datasets.logging.set_verbosity(state['verbosity'])
-
-    def __init__(
-        self,
-        caching: bool = False,
-        progress_bar: bool = False,
-        verbosity: int = logging.ERROR,
-    ) -> None:
-        super().__init__()
-
-        self.old_state = None
-        self.new_state = {
-            'caching': caching,
-            'progress_bar': progress_bar,
-            'verbosity': verbosity,
-        }
-    
-    def __enter__(self):
-        self.old_state = self.get_state()
-        self.set_state(self.new_state)
-    
-    def __exit__(self, __exc_type, __exc_value, __traceback):
-        self.set_state(self.old_state)
-
 def parse_ev(type_: Type[T1], ev_name: str, default: T2 = None) -> Union[T1, T2]:
     ev = os.environ.get(ev_name)
     return type_(ev) if ev is not None else default
@@ -119,10 +47,3 @@ def cpu_count() -> int:
     except FileNotFoundError:
         import psutil
         return psutil.cpu_count(logical=False)
-
-@contextmanager
-def disable_output():
-    sys.stdout = open(os.devnull, 'w')
-    yield
-    sys.stdout.close()
-    sys.stdout = sys.__stdout__
