@@ -3,29 +3,29 @@ import multiprocess
 
 
 def main(
-    data_path: str | list[str],
+    dataset_kwargs: dict,
     tokenizer_path: str,
-    dataset_path: str,
     max_length: int,
+    stride: int | None,
+    concat_method: str,
     num_proc: int | None = None,
 ):
-    from taide_cp.data import DataModuleForPreTraining, DataModuleForPreTrainingConfig
+    from taide_cp.data import DataModuleForPreTraining, PreTrainingConfig
     from taide_cp.models import AutoTokenizer
 
     multiprocess.set_start_method('spawn')
 
     datamodule = DataModuleForPreTraining(
-        DataModuleForPreTrainingConfig(
+        PreTrainingConfig(
+            AutoTokenizer.from_pretrained(tokenizer_path),
+            dataset_kwargs=dataset_kwargs,
             max_length=max_length,
-            data_path=data_path,
-            dataset_path=dataset_path,
+            stride=stride,
+            concat_method=concat_method,
             num_proc=num_proc,
         ),
-        tokenizer=AutoTokenizer.from_pretrained(tokenizer_path, model_max_length=None),
     )
     datamodule.prepare_data()
-    num_tokens = datamodule.count_tokens()
-    print(f'Total Tokens: {num_tokens}')
 
 
 if __name__ == '__main__':
