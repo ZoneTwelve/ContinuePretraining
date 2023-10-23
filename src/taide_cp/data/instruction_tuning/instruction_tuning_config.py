@@ -18,8 +18,6 @@ class ConcatMethod(StrEnum):
 
 
 class InstructionTuningConfig(DataModuleConfig):
-    _keys_to_ignore_on_log = ['tokenizer']
-
     tokenizer: PreTrainedTokenizerBase
     prompt_template: Template | str
     response_template: Template | str

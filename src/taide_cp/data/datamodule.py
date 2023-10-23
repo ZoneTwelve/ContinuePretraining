@@ -8,10 +8,36 @@ from datasets.fingerprint import (Hasher, format_kwargs_for_fingerprint,
                                   format_transform_for_fingerprint,
                                   update_fingerprint)
 from torch.utils.data import DataLoader
+from torch.utils.data.dataloader import _BaseDataLoaderIter
 from transformers import PreTrainedTokenizerBase
 
 from ..utils.config import ConfigBase
 from .datacollator import DataCollator
+
+
+class ResumableDataLoader(DataLoader):
+    
+    def __init__(
+        self,
+        datamodule: "DataModule",
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+
+        self._datamodule = datamodule
+        self._resumed = False
+
+    def __iter__(self) -> _BaseDataLoaderIter:
+        current_step = 0
+        if not self._resumed:
+            current_step = self._datamodule._current_step
+            self._resumed = True
+
+        it = super().__iter__()
+        for _ in range(current_step):
+            next(it)
+        return it
 
 
 class DataModuleConfig(ConfigBase):
@@ -31,10 +57,12 @@ class DataModule(L.LightningDataModule):
     def __init__(self, config: DataModuleConfig) -> None:
         super().__init__()
 
-        self.save_hyperparameters({'datamodule_config': config.get_config_to_log()})
+        self.save_hyperparameters({'datamodule_config': config})
 
         self.config = config
         self.prepare_data_per_node = config.prepare_data_per_node
+        
+        self._current_step = None
 
     def _prepare_data(self, current_hook: str | None = None) -> DatasetDict:
         dataset_dict = load_dataset(**self.config.dataset_kwargs)
@@ -50,15 +78,22 @@ class DataModule(L.LightningDataModule):
     def prepare_data(self) -> None:
         self._prepare_data('prepare_data')
 
-    def _get_dataloader(self, split: str, shuffle: bool | None = None):
-        return DataLoader(
-            self.dataset_dict[split],
+    def _get_dataloader(self, split: str):
+        dataloader_class = DataLoader
+        dataloader_kwargs = dict(
+            dataset=self.dataset_dict[split],
             batch_size=self.config.batch_size,
-            shuffle=shuffle,
             num_workers=self.config.num_workers,
             collate_fn=self.datacollator,
             pin_memory=self.config.pin_memory
         )
+
+        if split == 'train':
+            dataloader_class = ResumableDataLoader
+            dataloader_kwargs['shuffle'] = True
+            dataloader_kwargs['datamodule'] = self
+
+        return dataloader_class(**dataloader_kwargs)
 
     def setup(self, stage: str | None = None) -> None:        
         self.dataset_dict = self._prepare_data('setup')
@@ -71,7 +106,7 @@ class DataModule(L.LightningDataModule):
 
         for k, v in mapping.items():
             if k in self.dataset_dict:
-                setattr(self, v, partial(self._get_dataloader, k, shuffle=k == 'train'))
+                setattr(self, v, partial(self._get_dataloader, k))
             else:
                 setattr(self, v, getattr(super(), v))
 
@@ -80,6 +115,14 @@ class DataModule(L.LightningDataModule):
     def val_dataloader(self): ...
     
     def test_dataloader(self): ...
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            'current_step': self.trainer.fit_loop.batch_idx
+        }
+    
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self._current_step = state_dict['current_step']
 
     @classmethod
     def hash_fn_kwargs(cls, fn_kwargs: dict[str, Any]):

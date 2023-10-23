@@ -82,14 +82,14 @@ class LitCausalLM(L.LightningModule):
     def __init__(self, config: LitCausalLMConfig) -> None:       
         super().__init__()
 
-        self.save_hyperparameters({'config': config.get_config_to_log()})
+        self.save_hyperparameters({'config': config})
 
         self.config = config
         self.model_config = self.model_config_class.from_pretrained(self.config.model_path, revision=config.revision)
         self.tokenizer = self.tokenizer_class.from_pretrained(self.config.tokenizer_path, revision=config.revision)
 
         assert self.config.extend_vocab or len(self.tokenizer) <= self.model_config.vocab_size
-        
+
         self.batch_perplexity = Perplexity(ignore_index=-100)
         self.train_perplexity = Perplexity(ignore_index=-100)
         self.val_perplexity = Perplexity(ignore_index=-100)

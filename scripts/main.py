@@ -96,17 +96,10 @@ class SaveConfigCallbackX(SaveConfigCallback):
 
 class CustomLightningCLI(LightningCLI):  
     def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
-        from taide_cp.lightning import ResumeDataLoaderCallback
-
-        # parser.link_arguments('model.init_args.config.max_length', 'data.init_args.config.max_length')
-        # parser.link_arguments('data.init_args.config.train_batch_size', 'trainer.strategy.init_args.logging_batch_size_per_gpu')
-        # parser.link_arguments('model.tokenizer', 'data.init_args.tokenizer', apply_on='instantiate')
-
         parser.link_arguments('data.init_args.config.batch_size', 'trainer.strategy.init_args.logging_batch_size_per_gpu')
         parser.link_arguments('model.tokenizer', 'data.init_args.config.tokenizer', apply_on='instantiate')
 
         parser.add_lightning_class_args(TrainingRoutineCallback, 'training_routine_callback')
-        parser.add_lightning_class_args(ResumeDataLoaderCallback, 'resume_dataloader_callback')
 
     def before_instantiate_classes(self) -> None:
         config = self.config.get(self.config.subcommand)

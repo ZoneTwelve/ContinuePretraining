@@ -13,8 +13,6 @@ class ConcatMethod(StrEnum):
 
 
 class PreTrainingConfig(DataModuleConfig):
-    _keys_to_ignore_on_log = ['tokenizer']
-
     tokenizer: PreTrainedTokenizerBase
     max_length: int | None = None
     stride: int | None = None

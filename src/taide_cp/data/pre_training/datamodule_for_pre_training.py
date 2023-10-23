@@ -96,8 +96,8 @@ class DataModuleForPreTraining(DataModule):
 
         self.datacollator = DataCollatorForPreTraining(config)
  
-    def _prepare_data(self) -> DatasetDict:
-        dataset_dict = super()._prepare_data()
+    def _prepare_data(self, current_hook: str | None = None) -> DatasetDict:
+        dataset_dict = super()._prepare_data(current_hook)
 
         dataset_dict = self.map_dataset_dict(
             dataset_dict,
