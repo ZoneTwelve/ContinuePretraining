@@ -1,6 +1,5 @@
 from .datacollator import DataCollator
-from .datamodule import LightningDataModuleX
+from .datamodule import DataModule, DataModuleConfig
 from .dummy import *
-from .multiple_choice_question import *
+from .instruction_tuning import *
 from .pre_training import *
-from .supervised_fine_tuning import *

@@ -1,244 +1,217 @@
-import os
-import random
-import shutil
-from tempfile import gettempdir
-from types import MethodType
-from typing import Literal, Mapping
+from dataclasses import KW_ONLY
+from functools import partial
+from typing import Any, Callable
 
 import lightning as L
-from datasets import (Dataset, DatasetDict, concatenate_datasets,
-                      get_dataset_config_info, load_dataset, load_from_disk)
+from datasets import Dataset, DatasetDict, Features, load_dataset
+from datasets.fingerprint import (Hasher, format_kwargs_for_fingerprint,
+                                  format_transform_for_fingerprint,
+                                  update_fingerprint)
 from torch.utils.data import DataLoader
+from transformers import PreTrainedTokenizerBase
 
-from ..lightning import ResumableDataLoader
-from ..utils import SLURM, DatasetsContextManager, cpu_count
 from ..utils.config import ConfigBase
 from .datacollator import DataCollator
 
-StageType = Literal['fit', 'validate', 'test', 'predict']
-SplitType = Literal['train', 'val', 'test', 'pred']
-
-STAGE2SPLIT: Mapping[StageType, SplitType] = {
-    'fit': 'train',
-    'validate': 'val',
-    'test': 'test',
-    'predict': 'pred',
-}
-
-
-def get_random_dir_path(seed: int | None = None):
-    s = 'abcdefghijklmnopqrstuvwxyz0123456789_'
-    r = random.Random(seed)
-    name = 'tmp' + ''.join(r.choice(s) for _ in range(8))
-    return os.path.join(gettempdir(), name)
-
 
 class DataModuleConfig(ConfigBase):
-    data_path: str | list[str] | None = None
-    dataset_path: str | None = None
-    train_batch_size: int = 1
-    val_batch_size: int | None = None
-    test_batch_size: int | None = None
-    pred_batch_size: int | None = None
-    train_split_size: int | float | None = None
-    val_split_size: int | float | None = None
-    test_split_size: int | float | None = None
-    pred_split_size: int | float | None = None
-    split_seed: int | None = 42
-    num_workers: int = 1
-    pin_memory: bool = True
+    _: KW_ONLY
+    dataset_kwargs: dict
+    batch_size: int = 1
     num_proc: int | None = None
-
-    def __post_init__(self):
-        self.num_proc = self.num_proc or cpu_count()
-
-        if isinstance(self.data_path, str):
-            self.data_path = [self.data_path]
-
-        if self.dataset_path is None:
-            seed = SLURM.job_id or os.getpgid(os.getpid())
-            self.dataset_path = get_random_dir_path(seed)
+    num_workers: int = 0
+    pin_memory: bool = True
+    cleanup_cache_files: bool = False
+    prepare_data_per_node: bool = False
 
 
-class LightningDataModuleX(L.LightningDataModule):
-    default_split: SplitType = 'train'
+class DataModule(L.LightningDataModule):
     datacollator: DataCollator | None = None
 
     def __init__(self, config: DataModuleConfig) -> None:
         super().__init__()
 
-        self.save_hyperparameters(config.asdict())
+        self.save_hyperparameters({'datamodule_config': config.get_config_to_log()})
 
-        self.dataset = DatasetDict()
         self.config = config
+        self.prepare_data_per_node = config.prepare_data_per_node
 
-        self.split_size: dict[SplitType, int | float | None] = {
-            'train': None,
-            'val': None,
-            'test': None,
-            'predict': None
-        }
-        self.set_split_size(
-            config.train_split_size,
-            config.val_split_size,
-            config.test_split_size,
-            config.pred_split_size
-        )
+    def _prepare_data(self, current_hook: str | None = None) -> DatasetDict:
+        dataset_dict = load_dataset(**self.config.dataset_kwargs)
 
-        self.batch_size: dict[SplitType, int | None] = {
-            'train': None,
-            'val': None,
-            'test': None,
-            'predict': None
-        }
-        self.set_batch_size(
-            config.train_batch_size,
-            config.val_batch_size,
-            config.test_batch_size,
-            config.pred_batch_size
-        )
+        if current_hook == 'prepare_data' and self.config.cleanup_cache_files:
+            dataset_dict.cleanup_cache_files()
 
-        self.cleanup_dataset_path = config.dataset_path is None
-
-    def set_batch_size(
-        self,
-        train: int | None = None,
-        val: int | None = None,
-        test: int | None = None,
-        predict: int | None = None,
-    ):
-        self.batch_size['train'] = train or self.batch_size['train']
-        self.batch_size['val'] = val or self.batch_size['val'] or train
-        self.batch_size['test'] = test or self.batch_size['test'] or train
-        self.batch_size['predict'] = predict or self.batch_size['predict'] or train
-
-    def set_split_size(
-        self,
-        train: int | float | None = None,
-        val: int | float | None = None,
-        test: int | float | None = None,
-        predict: int | float | None = None,
-    ):            
-        self.split_size['train'] = train
-        self.split_size['val'] = val
-        self.split_size['test'] = test
-        self.split_size['predict'] = predict
-
-    def _set_dataloader_method(self, split: str):
-        method_name = f'{split}_dataloader'
-        setattr(self, method_name, MethodType(getattr(self.__class__, method_name), self))
-
-    def _unset_dataloader_method(self, split: str):
-        method_name = f'{split}_dataloader'
-        setattr(self, method_name, MethodType(getattr(L.LightningDataModule, method_name), self))
-
-
-    @DatasetsContextManager()
-    def split(self, dataset: Dataset):
-        dataset_dict = DatasetDict()
-        dataset = dataset.shuffle(seed=self.config.split_seed)
-
-        size: dict[SplitType, int | float | None] = {}
-        for sp, sz in self.split_size.items():
-            if isinstance(sz, float):
-                size[sp] = int(dataset.num_rows * sz)
-            else:
-                size[sp] = sz
-
-        if (
-            size['train'] is None
-            and size['val'] is None
-            and size['test'] is None
-            and size['predict'] is None
-        ):
-            dataset_dict[self.default_split] = dataset
-        elif (
-            size['train'] is None
-            and size['val'] is not None and size['val'] < dataset.num_rows
-            and size['test'] is None
-            and size['predict'] is None
-        ):
-            train_size = dataset.num_rows - size['val']
-            dataset_dict['train'] = dataset.select(range(train_size))
-            dataset_dict['val'] = dataset.select(range(train_size, dataset.num_rows))
-        else:
-            s = 0
-            for sp, sz in size.items():
-                if sz:
-                    e = s + sz
-                    dataset_dict[sp] = dataset.select(range(s, e))
-                    s = e
-
-        for split in ['train', 'val', 'test', 'predict']:
-            if split in dataset_dict:
-                self._set_dataloader_method(split)
-            else:
-                self._unset_dataloader_method(split)
-
+        split = self.config.dataset_kwargs.get('split', None)
+        if split:
+            dataset_dict = DatasetDict({split: dataset_dict})
         return dataset_dict
-    
+
     def prepare_data(self) -> None:
-        if self.is_dataset(self.config.dataset_path):
-            return
+        self._prepare_data('prepare_data')
+
+    def _get_dataloader(self, split: str, shuffle: bool | None = None):
+        return DataLoader(
+            self.dataset_dict[split],
+            batch_size=self.config.batch_size,
+            shuffle=shuffle,
+            num_workers=self.config.num_workers,
+            collate_fn=self.datacollator,
+            pin_memory=self.config.pin_memory
+        )
+
+    def setup(self, stage: str | None = None) -> None:        
+        self.dataset_dict = self._prepare_data('setup')
+
+        mapping = {
+            'train': 'train_dataloader',
+            'validation': 'val_dataloader',
+            'test': 'test_dataloader'
+        }
+
+        for k, v in mapping.items():
+            if k in self.dataset_dict:
+                setattr(self, v, partial(self._get_dataloader, k, shuffle=k == 'train'))
+            else:
+                setattr(self, v, getattr(super(), v))
+
+    def train_dataloader(self): ...
+
+    def val_dataloader(self): ...
+    
+    def test_dataloader(self): ...
+
+    @classmethod
+    def hash_fn_kwargs(cls, fn_kwargs: dict[str, Any]):
+        x = {}
+        for k, v in fn_kwargs.items():
+            if isinstance(v, PreTrainedTokenizerBase):
+                s: dict = v.__getstate__()
+                s.pop('tokens_trie', None)
+                x[k] = Hasher.hash(s)
+            else:
+                x[k] = v
+        return Hasher.hash(x)
+    
+    @classmethod
+    def map_dataset(
+        cls,
+        dataset: Dataset,
+        function: Callable | None = None,
+        with_indices: bool = False,
+        with_rank: bool = False,
+        input_columns: str | list[str] | None = None,
+        batched: bool = False,
+        batch_size: int | None = 1000,
+        drop_last_batch: bool = False,
+        remove_columns: str | list[str] | None = None,
+        keep_in_memory: bool = False,
+        load_from_cache_file: bool | None = None,
+        cache_file_name: str | None = None,
+        writer_batch_size: int | None = 1000,
+        features: Features | None = None,
+        disable_nullable: bool = False,
+        fn_kwargs: dict | None = None,
+        num_proc: int | None = None,
+        suffix_template: str = "_{rank:05d}_of_{num_proc:05d}",
+        new_fingerprint: str | None = None,
+        desc: str | None = None,
+        cache_file_name_fn: Callable[[str], str] | None = None
+    ):
+        dataset_kwargs = {
+            'shard': dataset,
+            'function': function,
+            'with_indices': with_indices,
+            'with_rank': with_rank,
+            'input_columns': input_columns,
+            'batched': batched,
+            'batch_size': batch_size,
+            'drop_last_batch': drop_last_batch,
+            'remove_columns': remove_columns,
+            'keep_in_memory': keep_in_memory,
+            'writer_batch_size': writer_batch_size,
+            'features': features,
+            'disable_nullable': disable_nullable,
+            'fn_kwargs': cls.hash_fn_kwargs(fn_kwargs),
+        }
+
+        if new_fingerprint is None:
+            transform = format_transform_for_fingerprint(Dataset._map_single)
+            kwargs_for_fingerprint = format_kwargs_for_fingerprint(Dataset._map_single, (), dataset_kwargs)
+            kwargs_for_fingerprint['fingerprint_name'] = 'new_fingerprint'
+            new_fingerprint = update_fingerprint(dataset._fingerprint, transform, kwargs_for_fingerprint)
         
-        dataset: Dataset = concatenate_datasets([load_dataset(p)['train'] for p in self.config.data_path])
-        dataset.save_to_disk(self.config.dataset_path)
-    
-    def setup(self, stage: StageType | None = None) -> None:
-        self.dataset = load_from_disk(self.config.dataset_path)
-        self.dataset = self.split(self.dataset)
+        if cache_file_name_fn is not None:
+            cache_file_name = cache_file_name_fn(new_fingerprint)
 
-    def train_dataloader(self):
-        dataloader = ResumableDataLoader(
-            self.dataset['train'],
-            batch_size=self.batch_size['train'],
-            pin_memory=self.config.pin_memory,
-            num_workers=self.config.num_workers,
-            collate_fn=self.datacollator,
-            shuffle=True,
-        )
-        if self.trainer is not None:
-            dataloader.current_step = self.trainer.fit_loop.batch_idx
-        return dataloader
-
-    def val_dataloader(self):
-        return DataLoader(
-            self.dataset['val'],
-            batch_size=self.batch_size['val'],
-            pin_memory=self.config.pin_memory,
-            num_workers=self.config.num_workers,
-            collate_fn=self.datacollator,
-            shuffle=False,
+        dataset = dataset.map(
+            function=function,
+            with_indices=with_indices,
+            with_rank=with_rank,
+            input_columns=input_columns,
+            batched=batched,
+            batch_size=batch_size,
+            drop_last_batch=drop_last_batch,
+            remove_columns=remove_columns,
+            keep_in_memory=keep_in_memory,
+            load_from_cache_file=load_from_cache_file,
+            cache_file_name=cache_file_name,
+            writer_batch_size=writer_batch_size,
+            features=features,
+            disable_nullable=disable_nullable,
+            fn_kwargs=fn_kwargs,
+            num_proc=num_proc,
+            suffix_template=suffix_template,
+            new_fingerprint=new_fingerprint,
+            desc=desc,
         )
         
-    def test_dataloader(self):
-        return DataLoader(
-            self.dataset['test'],
-            batch_size=self.batch_size['test'],
-            pin_memory=self.config.pin_memory,
-            num_workers=self.config.num_workers,
-            collate_fn=self.datacollator,
-            shuffle=False,
-        )
-    
-    def predict_dataloader(self):
-        return DataLoader(
-            self.dataset['predict'],
-            batch_size=self.batch_size['predict'],
-            pin_memory=self.config.pin_memory,
-            num_workers=self.config.num_workers,
-            collate_fn=self.datacollator,
-            shuffle=False,
-        )
-    
-    def teardown(self, stage: StageType | None = None) -> None:
-        if self.cleanup_dataset_path:
-            shutil.rmtree(self.config.dataset_path, ignore_errors=True)
+        return dataset
 
-    @staticmethod
-    def is_dataset(path: str):
-        try:
-            get_dataset_config_info(path)
-            return True
-        except FileNotFoundError:
-            return False
+    @classmethod
+    def map_dataset_dict(
+        cls,
+        dataset_dict: DatasetDict,
+        function: Callable | None = None,
+        with_indices: bool = False,
+        with_rank: bool = False,
+        input_columns: str | list[str] | None = None,
+        batched: bool = False,
+        batch_size: int | None = 1000,
+        drop_last_batch: bool = False,
+        remove_columns: str | list[str] | None = None,
+        keep_in_memory: bool = False,
+        load_from_cache_file: bool | None = None,
+        cache_file_names: dict[str, str | None] | None = None,
+        writer_batch_size: int | None = 1000,
+        features: Features | None = None,
+        disable_nullable: bool = False,
+        fn_kwargs: dict | None = None,
+        num_proc: int | None = None,
+        desc: str | None = None,
+    ):
+        if cache_file_names is None:
+            cache_file_names = {k: None for k in dataset_dict}
+
+        return DatasetDict({
+            k: cls.map_dataset(
+                dataset,
+                function=function,
+                with_indices=with_indices,
+                with_rank=with_rank,
+                input_columns=input_columns,
+                batched=batched,
+                batch_size=batch_size,
+                drop_last_batch=drop_last_batch,
+                remove_columns=remove_columns,
+                keep_in_memory=keep_in_memory,
+                load_from_cache_file=load_from_cache_file,
+                cache_file_name=cache_file_names[k],
+                writer_batch_size=writer_batch_size,
+                features=features,
+                disable_nullable=disable_nullable,
+                fn_kwargs=fn_kwargs,
+                num_proc=num_proc,
+                desc=desc
+            ) for k, dataset in dataset_dict.items()
+        })
