@@ -5,7 +5,7 @@
 /temp*
 
 config/*
-!config/example.yaml
+!config/example_*.yaml
 
 slurm-*.out
 
