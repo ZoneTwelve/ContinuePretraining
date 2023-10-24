@@ -60,20 +60,20 @@ srunx -g 8 # GPU=8、CPU=32、RAM=720GB
 
 使用 YAML 檔案來設定訓練參數，可以參考 [config](config) 資料夾下的檔案，但因程式碼改動，有些設定檔可能會報錯
 
-### [`scripts/cp/main.py`](scripts/cp/main.py)
+### [`scripts/main.py`](scripts/main.py)
 
 訓練腳本
 
 #### 使用 `config/XXX.yaml` 進行訓練
 
 ```sh
-python scripts/cp/main.py fit --config "config/XXX.yaml"
+python scripts/main.py fit --config "config/XXX.yaml"
 ```
 
 #### 從存檔點恢復訓練
 
 ```sh
-python scripts/cp/main.py fit \
+python scripts/main.py fit \
     --config "config/XXX.yaml" \
     --trainer.logger.version "XXX" \
     --ckpt_path "XXX.ckpt"
@@ -85,7 +85,7 @@ python scripts/cp/main.py fit \
 sbatchx -j train --nodes 4 "python scripts/cp/main.py fit --config \"config/XXX.yaml\""
 ```
 
-參考 [`scripts/shell/train.sh`](scripts/shell/train.sh)
+參考 [`shell_scripts/train.sh`](shell_scripts/train.sh)
 
 ### [`scripts/cp/prepare_data_for_pre_training.py`](scripts/cp/prepare_data_for_pre_training.py)
 

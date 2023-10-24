@@ -1,30 +1,28 @@
+import os
+
 import fire
+import torch
 
-from taide_cp.models import LightningModuleForPreTraining, LightningModuleForPreTrainingWithLoRA
-
-
-def _fix_import():
-    import sys
-
-    from taide_cp import models
-
-    sys.modules['taide_cp.training'] = models
+from taide_cp.models import LitCausalLMConfig, LitLlamaForCausalLM
+from taide_cp.utils.deepspeed import convert_zero_checkpoint_to_fp32_state_dict
 
 
 def main(
     checkpoint_path: str,
-    output_path: str,
-    model_path: str | None = None,
-    tokenizer_path: str | None = None,
+    output_path: str
 ):
-    tokenizer, model = LightningModuleForPreTraining.convert_to_hf(
-        checkpoint_path,
-        model_path,
-        tokenizer_path
-    )
-    model.config.torch_dtype = 'float16'
-    model.save_pretrained(output_path, max_shard_size='1000GB', safe_serialization=True)
-    tokenizer.save_pretrained(output_path)
+    if os.path.isdir(checkpoint_path):
+        checkpoint = convert_zero_checkpoint_to_fp32_state_dict(checkpoint_path)
+    else:
+        checkpoint = torch.load(checkpoint_path)
+
+    config: LitCausalLMConfig = checkpoint['hyper_parameters']['config']
+    model = LitLlamaForCausalLM(config)
+    model.configure_sharded_model()
+    model.load_state_dict(checkpoint['state_dict'])
+    model.model.save_pretrained(output_path, max_shard_size='1000GB', safe_serialization=True)
+    model.tokenizer.save_pretrained(output_path)
+
 
 if __name__ == '__main__':
     fire.Fire(main)

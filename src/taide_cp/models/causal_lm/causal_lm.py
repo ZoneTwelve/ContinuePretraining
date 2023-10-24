@@ -79,6 +79,10 @@ class LitCausalLM(L.LightningModule):
     model_config: PretrainedConfig
     tokenizer: PreTrainedTokenizerBase
 
+    @property
+    def strategy(self):
+        return None if self._trainer is None else self.trainer.strategy
+
     def __init__(self, config: LitCausalLMConfig) -> None:       
         super().__init__()
 
@@ -100,8 +104,8 @@ class LitCausalLM(L.LightningModule):
             config=self.model_config,
             revision=self.config.revision
         )
-        if isinstance(self.trainer.strategy, EnhancedDeepSpeedStrategy):
-            kwargs['low_cpu_mem_usage'] = not self.trainer.strategy.zero_stage_3
+        if isinstance(self.strategy, EnhancedDeepSpeedStrategy):
+            kwargs['low_cpu_mem_usage'] = not self.strategy.zero_stage_3
         return kwargs
     
     def _call_patchers(self):
@@ -111,13 +115,14 @@ class LitCausalLM(L.LightningModule):
     def configure_sharded_model(self) -> None:
         context_managers = []
         
-        load_from_checkpoint = self.trainer.ckpt_path is not None
+        load_from_checkpoint = self._trainer is not None and self.trainer.ckpt_path is not None
         if load_from_checkpoint:
             context_managers.append(no_init_weights())    
         
-        if isinstance(self.trainer.strategy, EnhancedDeepSpeedStrategy):
-            if load_from_checkpoint:
-                context_managers.append(self.trainer.strategy.ds_init_context)
+        if isinstance(self.strategy, EnhancedDeepSpeedStrategy):
+            import deepspeed
+            if load_from_checkpoint and self.strategy.zero_stage_3:
+                context_managers.append(deepspeed.zero.Init(config_dict_or_path=self.strategy.config))
 
         if not load_from_checkpoint:
             self.model: PreTrainedModel = self.model_class.from_pretrained(self.config.model_path, **self._get_model_kwargs())
@@ -138,9 +143,9 @@ class LitCausalLM(L.LightningModule):
         optimizer_config = {}
 
         optimizer_cls = AdamW
-        if isinstance(self.trainer.strategy, EnhancedDeepSpeedStrategy):
+        if isinstance(self.strategy, EnhancedDeepSpeedStrategy):
             from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
-            optimizer_cls = DeepSpeedCPUAdam if self.trainer.strategy.offload_optimizer else FusedAdam
+            optimizer_cls = DeepSpeedCPUAdam if self.strategy.offload_optimizer else FusedAdam
 
         optimizer_config['optimizer'] = optimizer_cls(
             self.parameters(),
