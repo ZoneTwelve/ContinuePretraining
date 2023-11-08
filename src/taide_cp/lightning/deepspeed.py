@@ -8,7 +8,7 @@ import torch
 from lightning.fabric.plugins import ClusterEnvironment
 from lightning.fabric.utilities.types import _PATH
 from lightning.pytorch.accelerators import Accelerator
-from lightning.pytorch.plugins.precision import PrecisionPlugin
+from lightning.pytorch.plugins import AsyncCheckpointIO, PrecisionPlugin
 from lightning.pytorch.strategies.deepspeed import DeepSpeedStrategy
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 from transformers.integrations import HfDeepSpeedConfig
@@ -49,7 +49,7 @@ class EnhancedDeepSpeedStrategy(DeepSpeedStrategy):
         zero_allow_untested_optimizer: bool = True,
         logging_batch_size_per_gpu: str | int = 'auto',
         config: _PATH | Dict[str, Any] | None = None,
-        logging_level: int = logging.WARN,
+        logging_level: int | str = logging.WARN,
         parallel_devices: List[torch.device] | None = None,
         cluster_environment: ClusterEnvironment | None = None,
         loss_scale: float = 0,
@@ -67,6 +67,9 @@ class EnhancedDeepSpeedStrategy(DeepSpeedStrategy):
         exclude_frozen_parameters: bool = False,
         raise_error_at_min_scale: bool | None = None,
     ):
+        if isinstance(logging_level, str):
+            logging_level = getattr(logging, logging_level.upper())
+
         super().__init__(accelerator, zero_optimization, stage, remote_device, offload_optimizer, offload_parameters, offload_params_device, nvme_path, params_buffer_count, params_buffer_size, max_in_cpu, offload_optimizer_device, optimizer_buffer_count, block_size, queue_depth, single_submit, overlap_events, thread_count, pin_memory, sub_group_size, contiguous_gradients, overlap_comm, allgather_partitions, reduce_scatter, allgather_bucket_size, reduce_bucket_size, zero_allow_untested_optimizer, logging_batch_size_per_gpu, config, logging_level, parallel_devices, cluster_environment, loss_scale, initial_scale_power, loss_scale_window, hysteresis, min_loss_scale, partition_activations, cpu_checkpointing, contiguous_memory_optimization, synchronize_checkpoint_boundary, load_full_weights, precision_plugin, process_group_backend)
         
         self.exclude_frozen_parameters = exclude_frozen_parameters
@@ -114,15 +117,16 @@ class EnhancedDeepSpeedStrategy(DeepSpeedStrategy):
         checkpoint = {k: v for k, v in checkpoint.items() if k not in _exclude_keys}
         self.deepspeed_engine.save_checkpoint(filepath, client_state=checkpoint, tag='checkpoint', exclude_frozen_parameters=self.exclude_frozen_parameters)
 
-        if self.is_global_zero and weights_only:
-            precision = self.precision_plugin.precision
-            if precision == '16-mixed':
-                dtype = torch.half
-            elif precision == 'bf16-mixed':
-                dtype = torch.bfloat16
-            else:
-                dtype = torch.float
-
-            checkpoint = get_lightning_checkpoint_from_zero_checkpoint(filepath, dtype=dtype)
+        def save_weights_only():
+            checkpoint = get_lightning_checkpoint_from_zero_checkpoint(filepath)
             shutil.rmtree(filepath)
-            self.checkpoint_io.save_checkpoint(checkpoint, filepath, storage_options)
+            checkpoint_io = self.checkpoint_io
+            if isinstance(checkpoint_io, AsyncCheckpointIO):
+                checkpoint_io = checkpoint_io.checkpoint_io
+            checkpoint_io.save_checkpoint(checkpoint, filepath, storage_options)
+
+        if self.is_global_zero and weights_only:
+            if isinstance(self.checkpoint_io, AsyncCheckpointIO):
+                self.checkpoint_io._executor.submit(save_weights_only)
+            else:
+                save_weights_only()
