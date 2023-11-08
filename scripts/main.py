@@ -1,6 +1,9 @@
+import logging
 import os
+from typing import Optional, Union
 
 import multiprocess
+import torch
 from lightning import LightningModule, Trainer
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
@@ -94,21 +97,38 @@ class SaveConfigCallbackX(SaveConfigCallback):
         self.already_saved = trainer.strategy.broadcast(self.already_saved)
 
 
-class CustomLightningCLI(LightningCLI):  
+class CustomLightningCLI(LightningCLI):
     def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
         parser.link_arguments('data.init_args.config.batch_size', 'trainer.strategy.init_args.logging_batch_size_per_gpu')
         parser.link_arguments('model.tokenizer', 'data.init_args.config.tokenizer', apply_on='instantiate')
 
-        parser.add_lightning_class_args(TrainingRoutineCallback, 'training_routine_callback')
+        parser.add_argument('--float32_matmul_precision', type=Optional[str], default=None)
+        parser.add_argument('--logging_level', type=Union[str, int], default=logging.INFO)
+
+        parser.add_lightning_class_args(TrainingRoutineCallback, 'training_routine')
+
+    def _setup_extra_args(self):
+        float32_matmul_precision = self._get(self.config, 'float32_matmul_precision')
+        if float32_matmul_precision is not None:
+            torch.set_float32_matmul_precision(float32_matmul_precision)
+        
+        logging_level = self._get(self.config, 'logging_level')
+        if isinstance(logging_level, str):
+            logging_level = getattr(logging, logging_level.upper())
+        
+        logging.getLogger('taide_cp').setLevel(logging_level)
 
     def before_instantiate_classes(self) -> None:
+        self._setup_extra_args()
+
         config = self.config.get(self.config.subcommand)
         extra_plugins = []
         if SLURM.is_slurm and SLURM.num_tasks > 1:
             extra_plugins += [{'class_path': 'SLURMEnvironment', 'init_args': {'auto_requeue': False}}]
         else:
             extra_plugins += [{'class_path': 'LightningEnvironment'}]
-        config.trainer.plugins = config.trainer.plugins or [] + extra_plugins
+        config.trainer.plugins = config.trainer.plugins or []
+        config.trainer.plugins += extra_plugins
 
 if __name__ == '__main__':
     multiprocess.set_start_method('spawn')
