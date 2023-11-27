@@ -4,7 +4,7 @@ from typing import Any
 import torch
 
 from ..datacollator import DataCollator
-from .instruction_tuning_config import InstructionTuningConfig
+from .instruction_tuning_config import ConcatMethod, InstructionTuningConfig
 
 
 class DataCollatorForInstructionTuning(DataCollator):
@@ -46,7 +46,14 @@ class DataCollatorForInstructionTuning(DataCollator):
         input_ids = []
         labels = []
         for x in batch:
-            x, y = self._merge_grouped(x)
+            if self.config.concat_method == ConcatMethod.NO_CONCAT:
+                pl = x['prompt_length']
+                x = x['input_ids']
+                y = x.copy()
+                y[:pl] = [-100] * pl
+            elif self.config.concat_method == ConcatMethod.GROUP_BY_LENGTH:
+                x, y = self._merge_grouped(x)
+
             input_ids += [x]
             labels += [y]
 

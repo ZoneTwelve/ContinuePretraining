@@ -16,17 +16,19 @@ def set_task_vectors(
         model.resize_token_embeddings(tv_vocab_size)
 
     for n, p in tqdm(list(model.named_parameters())):
+        v = tv['task_vectors'][n].to(device=p.device) * coefficient
+        
         if n in ['model.embed_tokens.weight', 'lm_head.weight']:
             if skip_embeddings:
                 continue
             
             if tv_vocab_size < model_vocab_size:
-                p.data[:tv_vocab_size] += tv['task_vectors'][n].to(p.device) * coefficient
+                p.data[:tv_vocab_size] += v
                 continue
                         
-            p.data += tv['task_vectors'][n].to(p.device) * coefficient
+            p.data += v
         else:
-            p.data += tv['task_vectors'][n].to(p.device) * coefficient
+            p.data += v
     return model
 
 

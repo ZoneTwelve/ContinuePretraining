@@ -1,6 +1,6 @@
 import dataclasses
 from types import UnionType
-from typing import ClassVar
+from typing import Any
 
 from typing_extensions import Self, dataclass_transform
 
@@ -37,10 +37,10 @@ class ConfigBase(metaclass=ConfigMeta):
     def keys(self):
         return (f.name for f in dataclasses.fields(self))
 
-    def __getitem__(self, name):
+    def __getitem__(self, name: str):
         return getattr(self, name)
     
-    def __setitem__(self, name, value):
+    def __setitem__(self, name: str, value: Any):
         setattr(self, name, value)
 
     def to_dict(self):

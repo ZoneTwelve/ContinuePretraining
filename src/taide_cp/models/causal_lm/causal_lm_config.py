@@ -2,6 +2,7 @@ from dataclasses import field
 from enum import auto
 from typing import Literal
 
+import torch
 from peft import LoraConfig, TaskType
 
 from ...patchers.patcher import Patcher
@@ -44,8 +45,9 @@ class OptimizerConfig(ConfigBase):
 
 class LitCausalLMConfig(ConfigBase):
     model_path: str
-    revision: str = 'main'
+    model_kwargs: dict = field(default_factory=dict)
     tokenizer_path: str | None = None
+    tokenizer_kwargs: dict = field(default_factory=dict)
     extend_vocab: Literal[False] | ExtendVocabConfig = False
     max_position_embeddings: int | None = None
     optimizer_config: OptimizerConfig = field(default_factory=OptimizerConfig)
@@ -53,6 +55,14 @@ class LitCausalLMConfig(ConfigBase):
 
     def __post_init__(self):
         self.tokenizer_path = self.tokenizer_path or self.model_path
+        
+        revision = self.model_kwargs.get('revision', 'main')
+        self.tokenizer_kwargs.setdefault('revision', revision)
+
+        if 'torch_dtype' in self.model_kwargs:
+            torch_dtype = self.model_kwargs['torch_dtype']
+            if torch_dtype != 'auto':
+                self.model_kwargs['torch_dtype'] = getattr(torch, torch_dtype)
 
 
 class LitCausalLMWithLoRAConfig(LitCausalLMConfig):

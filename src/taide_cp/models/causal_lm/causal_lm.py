@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import lightning as L
 import torch
@@ -89,8 +89,8 @@ class LitCausalLM(L.LightningModule):
         self.save_hyperparameters({'config': config})
 
         self.config = config
-        self.model_config = self.model_config_class.from_pretrained(self.config.model_path, revision=config.revision)
-        self.tokenizer = self.tokenizer_class.from_pretrained(self.config.tokenizer_path, revision=config.revision)
+        self.model_config = self.model_config_class.from_pretrained(self.config.model_path, **config.model_kwargs)
+        self.tokenizer = self.tokenizer_class.from_pretrained(self.config.tokenizer_path, **config.tokenizer_kwargs)
 
         assert self.config.extend_vocab or len(self.tokenizer) <= self.model_config.vocab_size
 
@@ -101,18 +101,20 @@ class LitCausalLM(L.LightningModule):
     def _get_model_kwargs(self):
         kwargs = dict(
             low_cpu_mem_usage=True,
-            config=self.model_config,
-            revision=self.config.revision
+            config=self.model_config
         )
+        kwargs |= self.config.model_kwargs
+
         if isinstance(self.strategy, EnhancedDeepSpeedStrategy):
             kwargs['low_cpu_mem_usage'] = not self.strategy.zero_stage_3
+
         return kwargs
     
     def _call_patchers(self):
         for patcher in self.config.patchers:
             patcher(self.model)
 
-    def configure_sharded_model(self) -> None:
+    def configure_model(self) -> None:
         context_managers = []
         
         load_from_checkpoint = self._trainer is not None and self.trainer.ckpt_path is not None
@@ -218,3 +220,15 @@ class LitCausalLM(L.LightningModule):
 
     def on_validation_end(self) -> None:
         self.model.gradient_checkpointing_enable()
+
+    def predict_step(self, batch: dict[str, Any], batch_idx: int, dataloader_idx: int = 0):
+        input_length = batch['input_ids'].size(1)
+        generation_config = batch['extra'][0].get('generation_config', {})
+        generation_config = GenerationConfig(**generation_config)
+        output_ids = self.model.generate(
+            batch['input_ids'],
+            generation_config=generation_config
+            # synced_gpus=self.trainer.num_devices > 0,
+        )[:, input_length:]
+        output_text = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
+        return output_text

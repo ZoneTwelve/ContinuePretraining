@@ -18,6 +18,8 @@ from taide_cp.patchers import *
 from taide_cp.utils.slurm import SLURM
 
 
+save_config = True
+
 class TrainingRoutineCallback(Callback):
     def setup(self, trainer: Trainer, pl_module: LightningModule, stage: str) -> None:
 
@@ -47,9 +49,14 @@ class TrainingRoutineCallback(Callback):
         pl_module.save_hyperparameters(extra_hyperparameters_to_save)
 
 
-class SaveConfigCallbackX(SaveConfigCallback):
+class CustomSaveConfigCallback(SaveConfigCallback):
     def setup(self, trainer: Trainer, pl_module: LightningModule, stage: str) -> None:
         from lightning.fabric.utilities.cloud_io import get_filesystem
+        
+        global save_config
+
+        if not save_config:
+            return
 
         logger = trainer.logger
 
@@ -104,6 +111,7 @@ class CustomLightningCLI(LightningCLI):
 
         parser.add_argument('--float32_matmul_precision', type=Optional[str], default=None)
         parser.add_argument('--logging_level', type=Union[str, int], default=logging.INFO)
+        parser.add_argument('--save_config', type=bool, default=True)
 
         parser.add_lightning_class_args(TrainingRoutineCallback, 'training_routine')
 
@@ -117,6 +125,10 @@ class CustomLightningCLI(LightningCLI):
             logging_level = getattr(logging, logging_level.upper())
         
         logging.getLogger('taide_cp').setLevel(logging_level)
+
+        if not self._get(self.config, 'save_config'):
+            global save_config
+            save_config = False
 
     def before_instantiate_classes(self) -> None:
         self._setup_extra_args()
@@ -133,7 +145,7 @@ class CustomLightningCLI(LightningCLI):
 if __name__ == '__main__':
     multiprocess.set_start_method('spawn')
     CustomLightningCLI(
-        save_config_callback=SaveConfigCallbackX,
+        save_config_callback=CustomSaveConfigCallback,
         save_config_kwargs={'overwrite': True},
         parser_kwargs={'parser_mode': 'omegaconf'}
     )

@@ -16,6 +16,7 @@ class PreTrainingConfig(DataModuleConfig):
     tokenizer: PreTrainedTokenizerBase
     max_length: int | None = None
     stride: int | None = None
+    drop_overlong: bool = False
     concat_method: ConcatMethod | str = ConcatMethod.CONCAT_AND_TRUNCATE
     pad_to_multiple_of: int | None = None
 

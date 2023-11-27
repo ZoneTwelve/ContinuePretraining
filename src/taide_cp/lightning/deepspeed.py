@@ -82,8 +82,9 @@ class EnhancedDeepSpeedStrategy(DeepSpeedStrategy):
         return 'offload_optimizer' in zero_optimization
 
     def _set_raise_error_at_min_scale(self):
-        loss_scaler = self.deepspeed_engine.optimizer.loss_scaler
-        if self.raise_error_at_min_scale is not None:
+        optimizer = getattr(self.deepspeed_engine, 'optimizer', None)
+        loss_scaler = getattr(optimizer, 'loss_scaler', None)
+        if self.raise_error_at_min_scale is not None and loss_scaler is not None:
             loss_scaler.raise_error_at_min_scale = self.raise_error_at_min_scale
 
     def setup(self, trainer: L.Trainer) -> None:

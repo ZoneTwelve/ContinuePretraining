@@ -1,7 +1,6 @@
 from string import Template
-from typing import cast
 
-from datasets import Dataset, DatasetDict
+from datasets import DatasetDict
 from transformers import PreTrainedTokenizerBase
 
 from ..datamodule import DataModule
@@ -60,6 +59,7 @@ def _drop_overlong(batch: dict[str, list], max_length: int):
     for i in sorted(ids_to_drop, reverse=True):
         del batch['input_ids'][i]
         del batch['prompt_length'][i]
+    return batch
 
 def _truncate_overlong(batch: dict[str, list], max_length: int):
     for i, x in enumerate(batch['input_ids']):
@@ -68,8 +68,9 @@ def _truncate_overlong(batch: dict[str, list], max_length: int):
 
             if batch['prompt_length'][i] > max_length:
                 batch['prompt_length'][i] = max_length
+    return batch
 
-def _group_by_length(lengths: list[int], max_length: int) -> list[list[int]]:
+def _group_indices_by_length(lengths: list[int], max_length: int) -> list[list[int]]:
     groups = []
     current_group = []
     current_sum = 0
@@ -88,16 +89,21 @@ def _group_by_length(lengths: list[int], max_length: int) -> list[list[int]]:
     
     return groups
 
-
-def _group_from_indices(batch: dict[str, list[list[int]]], dataset: Dataset):
+def _group_by_length(batch: dict[str, list[list[int]]], max_length: int):
     new_batch = {
         'grouped_input_ids': [],
         'grouped_prompt_length': [],
     }
-    for g in batch['grouped_indices']:
-        x = dataset[g]
-        new_batch['grouped_input_ids'] += [x['input_ids']]
-        new_batch['grouped_prompt_length'] += [x['prompt_length']]
+
+    groups = _group_indices_by_length([len(x) for x in batch['input_ids']], max_length)
+    for group in groups:
+        grouped_input_ids = []
+        grouped_prompt_length = []
+        for i in group:
+            grouped_input_ids.append(batch['input_ids'][i])
+            grouped_prompt_length.append(batch['prompt_length'][i])
+        new_batch['grouped_input_ids'].append(grouped_input_ids)
+        new_batch['grouped_prompt_length'].append(grouped_prompt_length)
     return new_batch
 
 
@@ -109,28 +115,28 @@ class DataModuleForInstructionTuning(DataModule):
 
         self.datacollator = DataCollatorForInstructionTuning(config)
  
-    def _prepare_data(self, current_hook: str | None = None) -> DatasetDict:
-        dataset_dict = super()._prepare_data(current_hook)
-
+    def process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
         dataset_dict = self.map_dataset_dict(
             dataset_dict,
             _apply_template,
             batched=True,
-            remove_columns='text',
+            remove_columns=True,
             fn_kwargs=dict(
                 prompt_template=self.config.prompt_template,
                 response_template=self.config.response_template
             ),
             num_proc=self.config.num_proc,
+            desc='Apply template'
         )
 
         dataset_dict = self.map_dataset_dict(
             dataset_dict,
             _tokenize,
             batched=True,
-            remove_columns='text',
+            remove_columns=['prompt', 'response'],
             fn_kwargs=dict(tokenizer=self.config.tokenizer),
             num_proc=self.config.num_proc,
+            desc='Tokenize'
         )
 
         if self.config.overlong_handling_method == OverlongHandlingMethod.DROP:
@@ -140,6 +146,7 @@ class DataModuleForInstructionTuning(DataModule):
                 batched=True,
                 fn_kwargs=dict(max_length=self.config.max_length),
                 num_proc=self.config.num_proc,
+                desc='Drop overlong'
             )
         elif self.config.overlong_handling_method == OverlongHandlingMethod.TRUNCATE:
             dataset_dict = self.map_dataset_dict(
@@ -148,20 +155,19 @@ class DataModuleForInstructionTuning(DataModule):
                 batched=True,
                 fn_kwargs=dict(max_length=self.config.max_length),
                 num_proc=self.config.num_proc,
+                desc='Truncate overlong'
             )
         
         if self.config.concat_method == ConcatMethod.GROUP_BY_LENGTH:
-            for k, dataset in dataset_dict.items():
-                dataset = cast(Dataset, dataset)
-                group_dataset = Dataset.from_dict({'grouped_indices': _group_by_length(dataset['length'], self.config.max_length)})
-                dataset_dict[k] = self.map_dataset(
-                    group_dataset,
-                    _group_from_indices,
-                    batched=True,
-                    remove_columns='grouped_indices',
-                    fn_kwargs=dict(dataset=dataset),
-                    num_proc=self.config.num_proc,
-                    cache_file_name_fn=lambda x: dataset._get_cache_file_path(x)
-                )
+            dataset_dict = self.map_dataset_dict(
+                dataset_dict,
+                _group_by_length,
+                batched=True,
+                batch_size=10000,
+                remove_columns=['input_ids', 'prompt_length'],
+                fn_kwargs=dict(max_length=self.config.max_length),
+                num_proc=self.config.num_proc,
+                desc='Group by length'
+            )
     
         return dataset_dict

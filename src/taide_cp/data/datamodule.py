@@ -1,9 +1,11 @@
+import logging
 from dataclasses import KW_ONLY
 from functools import partial
 from typing import Any, Callable
 
 import lightning as L
-from datasets import Dataset, DatasetDict, Features, load_dataset
+from datasets import (Dataset, DatasetDict, Features, load_dataset,
+                      load_from_disk)
 from datasets.fingerprint import (Hasher, format_kwargs_for_fingerprint,
                                   format_transform_for_fingerprint,
                                   update_fingerprint)
@@ -14,6 +16,7 @@ from transformers import PreTrainedTokenizerBase
 from ..utils.config import ConfigBase
 from .datacollator import DataCollator
 
+logger = logging.getLogger(__name__)
 
 class ResumableDataLoader(DataLoader):
     
@@ -26,13 +29,12 @@ class ResumableDataLoader(DataLoader):
         super().__init__(*args, **kwargs)
 
         self._datamodule = datamodule
-        self._resumed = False
 
     def __iter__(self) -> _BaseDataLoaderIter:
         current_step = 0
-        if not self._resumed and self._datamodule._current_step is not None:
-            current_step = self._datamodule._current_step
-            self._resumed = True
+        if self._datamodule._resume is not None:
+            if self._datamodule.trainer.current_epoch == self._datamodule._resume['current_epoch']:
+                current_step = self._datamodule._resume['current_step']
 
         it = super().__iter__()
         for _ in range(current_step):
@@ -42,7 +44,8 @@ class ResumableDataLoader(DataLoader):
 
 class DataModuleConfig(ConfigBase):
     _: KW_ONLY
-    dataset_kwargs: dict
+    dataset_kwargs: dict | None = None
+    dataset_path: str | None = None
     batch_size: int = 1
     num_proc: int | None = None
     num_workers: int = 0
@@ -50,6 +53,8 @@ class DataModuleConfig(ConfigBase):
     cleanup_cache_files: bool = False
     prepare_data_per_node: bool = False
 
+    def __post_init__(self):
+        assert self.dataset_kwargs is not None or self.dataset_path is not None
 
 class DataModule(L.LightningDataModule):
     datacollator: DataCollator | None = None
@@ -62,22 +67,27 @@ class DataModule(L.LightningDataModule):
         self.config = config
         self.prepare_data_per_node = config.prepare_data_per_node
         
-        self._current_step = None
+        self._resume = None
 
-    def _prepare_data(self, current_hook: str | None = None) -> DatasetDict:
+    def load_data(self) -> DatasetDict:
+        assert self.config.dataset_kwargs is not None
+        
         dataset_dict = load_dataset(**self.config.dataset_kwargs)
-
-        if current_hook == 'prepare_data' and self.config.cleanup_cache_files:
-            dataset_dict.cleanup_cache_files()
-
         split = self.config.dataset_kwargs.get('split', None)
         if split:
             dataset_dict = DatasetDict({split: dataset_dict})
         return dataset_dict
 
+    def process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
+        return dataset_dict
+        
     def prepare_data(self) -> None:
-        self._prepare_data('prepare_data')
-
+        if self.config.dataset_path is None:
+            dataset_dict = self.load_data()
+            if self.config.cleanup_cache_files:
+                dataset_dict.cleanup_cache_files()
+            self.process_data(dataset_dict)
+    
     def _get_dataloader(self, split: str):
         dataloader_class = DataLoader
         dataloader_kwargs = dict(
@@ -95,13 +105,20 @@ class DataModule(L.LightningDataModule):
 
         return dataloader_class(**dataloader_kwargs)
 
-    def setup(self, stage: str | None = None) -> None:        
-        self.dataset_dict = self._prepare_data('setup')
+    def setup(self, stage: str | None = None) -> None:
+        if self.config.dataset_path is None:
+            dataset_dict = self.load_data()
+            self.dataset_dict = self.process_data(dataset_dict)
+        else:
+            logger.debug('load_from_disk')
+            self.dataset_dict = load_from_disk(self.config.dataset_path)
+            logger.debug('done')
 
         mapping = {
             'train': 'train_dataloader',
             'validation': 'val_dataloader',
-            'test': 'test_dataloader'
+            'test': 'test_dataloader',
+            'predict': 'predict_dataloader'
         }
 
         for k, v in mapping.items():
@@ -110,28 +127,35 @@ class DataModule(L.LightningDataModule):
             else:
                 setattr(self, v, getattr(super(), v))
 
+    def save_to_disk(self, dataset_path: str):
+        assert self.dataset_dict is not None
+        self.dataset_dict.save_to_disk(dataset_path, num_proc=self.config.num_proc)
+
     def train_dataloader(self): ...
 
     def val_dataloader(self): ...
     
     def test_dataloader(self): ...
 
+    def predict_dataloader(self): ...
+
     def state_dict(self) -> dict[str, Any]:
         return {
-            'current_step': self.trainer.fit_loop.batch_idx
+            '_resume': {
+                'current_epoch': self.trainer.current_epoch,
+                'current_step': self.trainer.fit_loop.batch_idx
+            }
         }
     
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        self._current_step = state_dict['current_step']
+        self._resume = state_dict['_resume']
 
     @classmethod
     def hash_fn_kwargs(cls, fn_kwargs: dict[str, Any]):
         x = {}
         for k, v in fn_kwargs.items():
             if isinstance(v, PreTrainedTokenizerBase):
-                s: dict = v.__getstate__()
-                s.pop('tokens_trie', None)
-                x[k] = Hasher.hash(s)
+                x[k] = Hasher.hash(v.init_kwargs)
             else:
                 x[k] = v
         return Hasher.hash(x)
@@ -158,8 +182,7 @@ class DataModule(L.LightningDataModule):
         num_proc: int | None = None,
         suffix_template: str = "_{rank:05d}_of_{num_proc:05d}",
         new_fingerprint: str | None = None,
-        desc: str | None = None,
-        cache_file_name_fn: Callable[[str], str] | None = None
+        desc: str | None = None
     ):
         dataset_kwargs = {
             'shard': dataset,
@@ -175,7 +198,7 @@ class DataModule(L.LightningDataModule):
             'writer_batch_size': writer_batch_size,
             'features': features,
             'disable_nullable': disable_nullable,
-            'fn_kwargs': cls.hash_fn_kwargs(fn_kwargs),
+            'fn_kwargs': cls.hash_fn_kwargs(fn_kwargs) if fn_kwargs is not None else fn_kwargs
         }
 
         if new_fingerprint is None:
@@ -183,9 +206,6 @@ class DataModule(L.LightningDataModule):
             kwargs_for_fingerprint = format_kwargs_for_fingerprint(Dataset._map_single, (), dataset_kwargs)
             kwargs_for_fingerprint['fingerprint_name'] = 'new_fingerprint'
             new_fingerprint = update_fingerprint(dataset._fingerprint, transform, kwargs_for_fingerprint)
-        
-        if cache_file_name_fn is not None:
-            cache_file_name = cache_file_name_fn(new_fingerprint)
 
         dataset = dataset.map(
             function=function,
@@ -222,7 +242,7 @@ class DataModule(L.LightningDataModule):
         batched: bool = False,
         batch_size: int | None = 1000,
         drop_last_batch: bool = False,
-        remove_columns: str | list[str] | None = None,
+        remove_columns: str | list[str] | bool | None = None,
         keep_in_memory: bool = False,
         load_from_cache_file: bool | None = None,
         cache_file_names: dict[str, str | None] | None = None,
@@ -246,7 +266,7 @@ class DataModule(L.LightningDataModule):
                 batched=batched,
                 batch_size=batch_size,
                 drop_last_batch=drop_last_batch,
-                remove_columns=remove_columns,
+                remove_columns=dataset.column_names if remove_columns == True else remove_columns,
                 keep_in_memory=keep_in_memory,
                 load_from_cache_file=load_from_cache_file,
                 cache_file_name=cache_file_names[k],
