@@ -1,5 +1,3 @@
-from typing import Optional, Tuple
-
 import torch
 from transformers.models.llama.modeling_llama import (LlamaDecoderLayer,
                                                       LlamaPreTrainedModel)
