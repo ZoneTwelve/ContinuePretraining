@@ -8,10 +8,9 @@ import torch
 from lightning.fabric.plugins import ClusterEnvironment
 from lightning.fabric.utilities.types import _PATH
 from lightning.pytorch.accelerators import Accelerator
-from lightning.pytorch.plugins import AsyncCheckpointIO, PrecisionPlugin
+from lightning.pytorch.plugins import AsyncCheckpointIO, Precision
 from lightning.pytorch.strategies.deepspeed import DeepSpeedStrategy
 from lightning.pytorch.utilities.types import STEP_OUTPUT
-from transformers.integrations import HfDeepSpeedConfig
 
 from ..utils.deepspeed import get_lightning_checkpoint_from_zero_checkpoint
 
@@ -23,7 +22,7 @@ class EnhancedDeepSpeedStrategy(DeepSpeedStrategy):
         accelerator: Accelerator | None = None,
         zero_optimization: bool = True,
         stage: int = 2,
-        remote_device: str = 'cpu',
+        remote_device: str | None = None,
         offload_optimizer: bool = False,
         offload_parameters: bool = False,
         offload_params_device: str = 'cpu',
@@ -62,7 +61,7 @@ class EnhancedDeepSpeedStrategy(DeepSpeedStrategy):
         contiguous_memory_optimization: bool = False,
         synchronize_checkpoint_boundary: bool = False,
         load_full_weights: bool = False,
-        precision_plugin: PrecisionPlugin | None = None,
+        precision_plugin: Precision | None = None,
         process_group_backend: str | None = None,
         exclude_frozen_parameters: bool = False,
         raise_error_at_min_scale: bool | None = None,
@@ -90,9 +89,11 @@ class EnhancedDeepSpeedStrategy(DeepSpeedStrategy):
     def setup(self, trainer: L.Trainer) -> None:
         super().setup(trainer)
 
-        self._hf_ds_config = HfDeepSpeedConfig(self.config)
         self._set_raise_error_at_min_scale()
         self.model_to_device()
+
+    def model_init_context(self):
+        return super().model_sharded_context()
 
     @contextmanager
     def model_sharded_context(self):
