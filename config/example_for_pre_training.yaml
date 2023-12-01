@@ -1,19 +1,23 @@
 seed_everything: 42
 trainer:
-  strategy: 
+  num_nodes: ${oc.env:SLURM_NNODES}
+  strategy:
     class_path: EnhancedDeepSpeedStrategy
     init_args:
       stage: 3
-      logging_level: 40 # logging.ERROR
+      logging_level: ERROR
   precision: 16-mixed
   logger:
-    class_path: WandbLogger
+    class_path: EnhancedandbLogger
     init_args:
-      name: example
+      name: example_for_pre_training
       save_dir: logs
       entity: tvllm
       project: Taide-CP
       save_code: true
+      tags:
+        - cp
+        - fp16
   callbacks:
     - class_path: LearningRateMonitor
     - class_path: ModelCheckpoint
@@ -58,7 +62,6 @@ model:
         num_warmup_steps: 0
         min_lr_factor: 0.1
       patchers:
-        - class_path: LLaMADeepSpeedPatcher
         # - class_path: LLaMAFP16Patcher
 data:
   class_path: DataModuleForPreTraining
@@ -66,10 +69,13 @@ data:
     config:
       dataset_kwargs:
         path: <DATASET_PATH>
+      dataset_path: null
       max_length: 4096
-      stride: 2048
-      concat_method: GROUP_BY_LENGTH
+      stride: 4096
+      concat_method: CONCAT_AND_TRUNCATE
       pad_to_multiple_of: 8
       batch_size: 1
       num_proc: 32
       num_workers: 4
+# float32_matmul_precision: medium
+# logging_level: DEBUG
