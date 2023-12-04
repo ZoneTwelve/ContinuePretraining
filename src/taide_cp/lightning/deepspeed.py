@@ -80,17 +80,28 @@ class EnhancedDeepSpeedStrategy(DeepSpeedStrategy):
         zero_optimization = self.config.get('zero_optimization', {})
         return 'offload_optimizer' in zero_optimization
 
+    @property
+    def is_fp16(self) -> bool:
+        return self.precision_plugin.precision.startswith('16')
+
     def _set_raise_error_at_min_scale(self):
         optimizer = getattr(self.deepspeed_engine, 'optimizer', None)
         loss_scaler = getattr(optimizer, 'loss_scaler', None)
         if self.raise_error_at_min_scale is not None and loss_scaler is not None:
             loss_scaler.raise_error_at_min_scale = self.raise_error_at_min_scale
+    
+    def _move_torchmetrics_to_device(self):
+        from torchmetrics import Metric
+
+        for m in self.model.modules():
+            if isinstance(m, Metric):
+                m.to(self.root_device)
 
     def setup(self, trainer: L.Trainer) -> None:
         super().setup(trainer)
 
         self._set_raise_error_at_min_scale()
-        self.model_to_device()
+        self._move_torchmetrics_to_device()
 
     def model_init_context(self):
         return super().model_sharded_context()
@@ -99,10 +110,17 @@ class EnhancedDeepSpeedStrategy(DeepSpeedStrategy):
     def model_sharded_context(self):
         yield
 
+    def _maybe_add_skipped_steps_to_progress_bar(self):
+        if self.is_fp16:
+            return
+        
+        progress_bar_metrics = self.lightning_module.trainer.progress_bar_metrics
+        progress_bar_metrics['skipped_steps'] = self.deepspeed_engine.skipped_steps
+
     def training_step(self, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
-        r = super().training_step(*args, **kwargs)
-        self.lightning_module.trainer.progress_bar_metrics['skipped_steps'] = self.deepspeed_engine.skipped_steps
-        return r
+        o = super().training_step(*args, **kwargs)
+        self._maybe_add_skipped_steps_to_progress_bar()
+        return o
 
     def save_checkpoint(self, checkpoint: dict, filepath: _PATH, storage_options: Any | None = None) -> None:
         weights_only = 'optimizer_states' not in checkpoint
