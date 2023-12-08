@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from functools import update_wrapper
 from types import MethodType
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
+import functools
+
 
 T = TypeVar('T')
 
@@ -22,6 +24,9 @@ class Patcher(ABC):
         original_method = MethodType(original_method, target)
         if method.__func__ is not original_method:
             setattr(target, name, original_method)
+
+    def patch_module(self, target: Any, module_path: str, module: Any):
+        rsetattr(target, module_path, module)
     
     def _validate(self, target: T): ...
 
@@ -43,3 +48,12 @@ class Patcher(ABC):
 class DummyPatcher(Patcher):
     def patch(self, target: T):
         return target
+
+
+
+def rgetattr(obj, attr):
+    return functools.reduce(getattr, [obj] + attr.split('.'))
+
+def rsetattr(obj, attr, val):
+    pre, _, post = attr.rpartition('.')
+    return setattr(rgetattr(obj, pre) if pre else obj, post, val)

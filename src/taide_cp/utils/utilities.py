@@ -41,9 +41,8 @@ def parse_ev(type_: Type[T1], ev_name: str, default: T2 = None) -> Union[T1, T2]
     return type_(ev) if ev is not None else default
 
 def cpu_count() -> int:
-    try:
-        import subprocess
-        return int(subprocess.run('nproc', stdout=subprocess.PIPE).stdout)
-    except FileNotFoundError:
-        import psutil
-        return psutil.cpu_count(logical=False)
+    if hasattr(os, 'sched_getaffinity'):
+        return len(os.sched_getaffinity(0))
+
+    cpu_count = os.cpu_count()
+    return 1 if cpu_count is None else cpu_count
