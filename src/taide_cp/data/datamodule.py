@@ -35,16 +35,13 @@ class ResumableDataLoader(DataLoader):
         if self._datamodule._resume is not None:
             if self._datamodule.trainer.current_epoch == self._datamodule._resume['current_epoch']:
                 current_step = self._datamodule._resume['current_step']
-
-        it = super().__iter__()
-        for _ in range(current_step):
-            next(it)
-        return it
+        return (x for i, x in enumerate(super().__iter__()) if i >= current_step)
 
 
 class DataModuleConfig(ConfigBase):
     _: KW_ONLY
     dataset_kwargs: dict | None = None
+    validation_split: int | float | None = None
     dataset_path: str | None = None
     batch_size: int = 1
     num_proc: int | None = None
@@ -73,9 +70,12 @@ class DataModule(L.LightningDataModule):
         assert self.config.dataset_kwargs is not None
         
         dataset_dict = load_dataset(**self.config.dataset_kwargs)
-        split = self.config.dataset_kwargs.get('split', None)
-        if split:
+
+        if (split := self.config.dataset_kwargs.get('split', False)):
             dataset_dict = DatasetDict({split: dataset_dict})
+
+        assert self.config.validation_split is None or 'train' in dataset_dict and len(dataset_dict) == 1
+
         return dataset_dict
 
     def process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
@@ -104,15 +104,23 @@ class DataModule(L.LightningDataModule):
             dataloader_kwargs['datamodule'] = self
 
         return dataloader_class(**dataloader_kwargs)
+    
+    def _maybe_split_validation_set(self, dataset_dict: DatasetDict):
+        if self.config.validation_split is not None:
+            dataset_dict = dataset_dict['train'].train_test_split(self.config.validation_split, seed=42)
+            dataset_dict['validation'] = dataset_dict.pop('test')
+        return dataset_dict
 
     def setup(self, stage: str | None = None) -> None:
         if self.config.dataset_path is None:
             dataset_dict = self.load_data()
-            self.dataset_dict = self.process_data(dataset_dict)
+            dataset_dict = self.process_data(dataset_dict)
         else:
-            logger.debug('load_from_disk')
-            self.dataset_dict = load_from_disk(self.config.dataset_path)
-            logger.debug('done')
+            logger.info('Load processed data from disk')
+            dataset_dict = load_from_disk(self.config.dataset_path)
+            logger.info('Done')
+
+        self.dataset_dict = self._maybe_split_validation_set(dataset_dict)
 
         mapping = {
             'train': 'train_dataloader',
