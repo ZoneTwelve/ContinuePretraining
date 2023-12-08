@@ -111,7 +111,7 @@ class EnhancedDeepSpeedStrategy(DeepSpeedStrategy):
         yield
 
     def _maybe_add_skipped_steps_to_progress_bar(self):
-        if self.is_fp16:
+        if not self.is_fp16:
             return
         
         progress_bar_metrics = self.lightning_module.trainer.progress_bar_metrics
