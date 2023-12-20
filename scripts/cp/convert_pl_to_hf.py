@@ -8,6 +8,12 @@ from taide_cp.utils.deepspeed import \
     get_lightning_checkpoint_from_zero_checkpoint
 
 
+_MODULE_MAPPING = {
+    ('taide_cp.data.pre_training.pre_training_config', 'PreTrainingConfig'): ('taide_cp.data.pre_training.datamodule_for_pre_training_config', 'DataModuleForPreTrainingConfig'),
+    ('taide_cp.data.pre_training.pre_training_config', 'ConcatMethod'): ('taide_cp.data.pre_training.datamodule_for_pre_training_config', 'ConcatMethod'),
+}
+
+
 def patch_unpickler():
     import pickle
 
@@ -15,14 +21,18 @@ def patch_unpickler():
 
     class Dummy:
         def __init__(self, *args, **kwargs) -> None:
-            self.args = args
-            self.kwargs = kwargs
+            self.args, kwargs = args, kwargs
 
     class Unpickler(_Unpickler):
-        def find_class(self, __module_name: str, __global_name: str):
+        def find_class(self, module_name: str, global_name: str):
+            if (t := (module_name, global_name)) and t in _MODULE_MAPPING:
+                module_name, global_name = _MODULE_MAPPING[t]
+
             try:
-                return super().find_class(__module_name, __global_name)
+                return super().find_class(module_name, global_name)
             except:
+                print('module_name', module_name)
+                print('global_name', global_name)
                 return Dummy
 
     pickle.Unpickler = Unpickler
@@ -45,10 +55,8 @@ def main(
     config.patchers.clear()
     model = LitLlamaForCausalLM(config)
     model.configure_model()
-    checkpoint['dtype'] = torch.half
-    model.to(checkpoint['dtype'])
-    model.load_state_dict(checkpoint['state_dict'])
-    model.model.save_pretrained(output_path, max_shard_size='1000GB', safe_serialization=True)
+    model.load_state_dict(checkpoint['state_dict'], assign=True)
+    model.model.save_pretrained(output_path)
     model.tokenizer.save_pretrained(output_path)
 
 

@@ -17,12 +17,12 @@ def main(
     concat_method: str,
     num_proc: int | None = None,
 ):
-    from taide_cp.data import DataModuleForPreTraining, PreTrainingConfig
+    from taide_cp.data import DataModuleForPreTraining, DataModuleForPreTrainingConfig
     from taide_cp.models import AutoTokenizer
 
     multiprocess.set_start_method('spawn')
 
-    config = PreTrainingConfig(
+    config = DataModuleForPreTrainingConfig(
         AutoTokenizer.from_pretrained(tokenizer_path),
         dataset_kwargs=dataset_kwargs,
         max_length=max_length,
