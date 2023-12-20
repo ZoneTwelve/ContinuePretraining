@@ -50,7 +50,6 @@ class DummyPatcher(Patcher):
         return target
 
 
-
 def rgetattr(obj, attr):
     return functools.reduce(getattr, [obj] + attr.split('.'))
 
