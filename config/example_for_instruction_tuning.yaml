@@ -1,7 +1,7 @@
 seed_everything: 42
 trainer:
   num_nodes: ${oc.env:SLURM_NNODES}
-  strategy:
+  strategy: 
     class_path: EnhancedDeepSpeedStrategy
     init_args:
       stage: 3
@@ -10,35 +10,26 @@ trainer:
   logger:
     class_path: EnhancedWandbLogger
     init_args:
-      name: example_for_pre_training
+      name: example_for_instruction_tuning
       save_dir: logs
       entity: tvllm
-      project: Taide-CP
-      save_code: true
+      project: taide-sft-7b
       tags:
-        - cp
-        - fp16
+        - sft
+        - bf16
+      save_code: true
   callbacks:
     - class_path: LearningRateMonitor
     - class_path: ModelCheckpoint
       init_args:
         save_on_train_epoch_end: true
         save_top_k: -1
-    - class_path: ModelCheckpoint
-      init_args:
-        save_top_k: 1
-        every_n_train_steps: 1000
-    - class_path: ModelCheckpoint
-      init_args:
-        monitor: Perplexity/Val
-        auto_insert_metric_name: false
-        filename: epoch={epoch}-step={step}-ppl={Perplexity/Val:.2f}
-  max_epochs: 1
+  max_epochs: 3
   min_epochs: 1
   max_steps: -1
   min_steps: null
   val_check_interval: null
-  check_val_every_n_epoch: null
+  check_val_every_n_epoch: 1
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0
   gradient_clip_algorithm: norm
@@ -47,12 +38,8 @@ model:
   init_args:
     config:
       model_path: <MODEL_PATH>
-      tokenizer_path: <TOKENIZER_PATH>
-      extend_vocab:
-        pad_to_multiple_of: 8
-      max_position_embeddings: 4096
       optimizer_config:
-        lr: 1e-4
+        lr: 1e-5
         betas:
           - 0.9
           - 0.95
@@ -65,18 +52,19 @@ model:
       #   - class_path: LLaMAFP16Patcher
       #   - class_path: LLaMAOptimizationPatcher
 data:
-  class_path: DataModuleForPreTraining
+  class_path: DataModuleForInstructionTuning
   init_args:
     config:
       dataset_kwargs:
-        path: <DATASET_PATH>
-      dataset_path: null
+        path: TLLM/ft-balance-100k
+        name: "20231020"
       max_length: 4096
-      stride: 4096
-      concat_method: CONCAT_AND_TRUNCATE
-      pad_to_multiple_of: 8
-      batch_size: 1
-      num_proc: 32
+      prompt_template: <s>[INST] $prompt [/INST]
+      response_template: $response</s>
+      concat_method: NO_CONCAT
+      pad_to_multiple_of: 64
+      batch_size: 8
+      num_proc: 4
       num_workers: 4
 # float32_matmul_precision: medium
 # logging_level: DEBUG
