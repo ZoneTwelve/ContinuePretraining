@@ -82,7 +82,7 @@ python scripts/main.py fit \
 #### 多節點訓練
 
 ```sh
-sbatchx -j train --nodes 4 "python scripts/cp/main.py fit --config \"config/XXX.yaml\""
+sbatchx -j train --nodes 4 "python scripts/main.py fit --config \"config/XXX.yaml\""
 ```
 
 參考 [`shell_scripts/train.sh`](shell_scripts/train.sh)
