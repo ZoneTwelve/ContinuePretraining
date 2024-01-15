@@ -95,7 +95,7 @@ sbatchx -j train --nodes 4 "python scripts/main.py fit --config \"config/XXX.yam
 srunx -g 8
 
 python scripts/cp/prepare_data_for_pre_training.py \
-    --data_path="..." \
+    --data_kwarg="{'path': '...', 'data_dir': '...'}" \
     --tokenizer_path="..." \
     --dataset_path="..." \
     --max_length=4096 \
