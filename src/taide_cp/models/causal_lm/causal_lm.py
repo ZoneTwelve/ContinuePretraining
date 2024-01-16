@@ -9,8 +9,8 @@ import lightning as L
 import torch
 import torch.distributed
 from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
-from deepspeed.ops.lion import FusedLion
 from torch import nn
+from torch.optim import AdamW
 from transformers import (PretrainedConfig, PreTrainedModel,
                           PreTrainedTokenizerBase)
 from transformers.integrations.deepspeed import HfDeepSpeedConfig
@@ -211,7 +211,6 @@ class LitCausalLM(L.LightningModule):
 
         optimizer_cls = AdamW
         if isinstance(self.strategy, EnhancedDeepSpeedStrategy):
-            from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
             optimizer_cls = DeepSpeedCPUAdam if self.strategy.offload_optimizer else FusedAdam
 
         optimizer_config['optimizer'] = optimizer_cls(
@@ -286,14 +285,3 @@ class LitCausalLM(L.LightningModule):
 
     def on_validation_end(self) -> None:
         self.model.gradient_checkpointing_enable()
-
-    def predict_step(self, batch: dict[str, Any], batch_idx: int, dataloader_idx: int = 0):
-        input_length = batch['input_ids'].size(1)
-        generation_config = batch['extra'][0].get('generation_config', {})
-        generation_config = GenerationConfig(**generation_config)
-        output_ids = self.model.generate(
-            batch['input_ids'],
-            generation_config=generation_config
-        )[:, input_length:]
-        output_text = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-        return output_text
