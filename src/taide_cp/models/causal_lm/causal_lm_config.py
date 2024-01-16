@@ -49,7 +49,6 @@ class LitCausalLMConfig(ConfigBase):
     tokenizer_path: str | None = None
     tokenizer_kwargs: dict = field(default_factory=dict)
     extend_vocab: Literal[False] | ExtendVocabConfig = False
-    max_position_embeddings: int | None = None
     optimizer_config: OptimizerConfig = field(default_factory=OptimizerConfig)
     patchers: list[Patcher] = field(default_factory=list)
 
@@ -59,10 +58,11 @@ class LitCausalLMConfig(ConfigBase):
         revision = self.model_kwargs.get('revision', 'main')
         self.tokenizer_kwargs.setdefault('revision', revision)
 
-        if 'torch_dtype' in self.model_kwargs:
-            torch_dtype = self.model_kwargs['torch_dtype']
-            if torch_dtype != 'auto':
-                self.model_kwargs['torch_dtype'] = getattr(torch, torch_dtype)
+        for k in ['torch_dtype', 'bnb_4bit_compute_dtype']:
+            if k in self.model_kwargs:
+                v = self.model_kwargs[k]
+                v = getattr(torch, v) if isinstance(v, str) and v != 'auto' else v
+                self.model_kwargs[k] = v
 
 
 class LitCausalLMWithLoRAConfig(LitCausalLMConfig):

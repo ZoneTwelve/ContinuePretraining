@@ -1,6 +1,6 @@
 from transformers import LlamaConfig, LlamaForCausalLM, LlamaTokenizer
 
-from .causal_lm import LitCausalLM, LitCausalLMConfig
+from .causal_lm import LitCausalLM
 
 
 class LitLlamaForCausalLM(LitCausalLM):
@@ -10,9 +10,3 @@ class LitLlamaForCausalLM(LitCausalLM):
 
     model: LlamaForCausalLM
     model_config: LlamaConfig
-
-    def __init__(self, config: LitCausalLMConfig) -> None:
-        super().__init__(config)
-
-        if self.config.max_position_embeddings is not None:
-            self.model_config.max_position_embeddings = self.config.max_position_embeddings
