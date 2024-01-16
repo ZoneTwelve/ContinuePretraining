@@ -12,11 +12,10 @@ logger = logging.getLogger(__name__)
 
 class DataModuleForPreTraining(DataModule):
     config: DataModuleForPreTrainingConfig
+    datacollator_class = DataCollatorForPreTraining
 
     def __init__(self, config: DataModuleForPreTrainingConfig) -> None:
         super().__init__(config)
-
-        self.datacollator = DataCollatorForPreTraining(config)
 
     def _tokenize(self, dataset_dict: DatasetDict):
         return self.map_dataset_dict(

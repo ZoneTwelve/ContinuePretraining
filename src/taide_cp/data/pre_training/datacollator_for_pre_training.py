@@ -7,12 +7,14 @@ from .datamodule_for_pre_training_config import DataModuleForPreTrainingConfig
 
 
 class DataCollatorForPreTraining(DataCollator):
+    config: DataModuleForPreTrainingConfig
+
     @property
     def tokenizer(self):
         return self.config.tokenizer
 
     def __init__(self, config: DataModuleForPreTrainingConfig) -> None:
-        self.config = config
+        super().__init__(config)
 
         assert config.tokenizer.pad_token is not None
     
