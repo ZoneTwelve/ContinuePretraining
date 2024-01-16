@@ -1,15 +1,17 @@
 import copy
+import inspect
 import logging
 from contextlib import nullcontext
-from typing import Any, TypedDict
+from typing import TypedDict
 
 import deepspeed
 import lightning as L
 import torch
 import torch.distributed
+from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
+from deepspeed.ops.lion import FusedLion
 from torch import nn
-from torch.optim import AdamW
-from transformers import (GenerationConfig, PretrainedConfig, PreTrainedModel,
+from transformers import (PretrainedConfig, PreTrainedModel,
                           PreTrainedTokenizerBase)
 from transformers.integrations.deepspeed import HfDeepSpeedConfig
 from transformers.modeling_utils import no_init_weights
@@ -43,9 +45,21 @@ class LitCausalLM(L.LightningModule):
         return None if self._trainer is None else self.trainer.strategy
     
     @property
-    def zero_stage_3(self):
-        return getattr(self.strategy, 'zero_stage_3', False)
+    def is_load_from_checkpoint(self) -> bool:
+        if self._trainer is None:
+            return False
+        
+        if self.trainer.ckpt_path is not None:
+            return True
 
+        current_frame = inspect.currentframe().f_back
+        while current_frame is not None:
+            f_locals = current_frame.f_locals
+            current_frame = current_frame.f_back
+
+            if isinstance(f_locals.get('self', None), L.Trainer) and 'ckpt_path' in f_locals:
+                return f_locals['ckpt_path'] is not None
+    
     def __init__(self, config: LitCausalLMConfig) -> None:       
         super().__init__()
 
@@ -91,7 +105,7 @@ class LitCausalLM(L.LightningModule):
         state_dict = model.state_dict()
         return state_dict
     
-    def _zero3_load_state_dict_into_model(self, model: PreTrainedModel, state_dict: dict[str, torch.Tensor] | None):        
+    def _zero3_load_state_dict_into_model(self, model: PreTrainedModel, state_dict: dict[str, torch.Tensor] | None):
         def chunk(l: list, n: int):
             x = []
             s = -(len(l) // -n)
@@ -118,19 +132,6 @@ class LitCausalLM(L.LightningModule):
         
         return model
     
-    def _construct_model_and_load_pretrained_weights(self) -> PreTrainedModel:
-        if self.zero_stage_3:
-            logger.info('Constructing model')
-            model = self._construct_model_from_config()
-            logger.info('Loading pretrained weights')
-            state_dict = self._get_pretrained_weights() if self.global_rank == 0 else None
-            logger.info('Loading pretrained weights into model')
-            self._zero3_load_state_dict_into_model(model, state_dict)
-        else:
-            logger.info('Constructing model from pretrained')
-            model = self._construct_model_from_pretrained()
-        return model
-
     def tie_partially_frozen_weights(self):
         if getattr(self.model.config, 'tie_word_embeddings'):
             input_embeddings: PartiallyFrozenEmbedding = self.model.get_input_embeddings()
@@ -140,7 +141,7 @@ class LitCausalLM(L.LightningModule):
             output_embeddings.frozen_linear.weight = input_embeddings.frozen_embedding.weight
             output_embeddings.trainable_linear.weight = input_embeddings.trainable_embedding.weight
     
-    def extend_vocabs(self):
+    def _maybe_extend_vocabs(self):
         config = self.config.extend_vocab
         model = self.model
         new_num_tokens = len(self.tokenizer)
@@ -149,7 +150,10 @@ class LitCausalLM(L.LightningModule):
         if not config:
             return
         
-        if isinstance(self.strategy, EnhancedDeepSpeedStrategy):
+        logger.info(f'[{self.global_rank}] Extend vocabs')
+
+        is_zero3 = getattr(self.strategy, 'zero_stage_3', False)
+        if is_zero3:
             hf_ds_config = HfDeepSpeedConfig(self.strategy.config)
         
         model.resize_token_embeddings(new_num_tokens, config.pad_to_multiple_of)
@@ -160,7 +164,7 @@ class LitCausalLM(L.LightningModule):
         with deepspeed.zero.GatheredParameters(
             [input_embeddings.weight, output_embeddings.weight],
             modifier_rank=0,
-            enabled=self.zero_stage_3
+            enabled=is_zero3
         ):
             if config.initializing_strategy == InitializingStrategy.MEAN:
                 input_embeddings.weight.data[old_num_tokens:].copy_(input_embeddings.weight.data[:old_num_tokens].mean(0))
@@ -183,17 +187,24 @@ class LitCausalLM(L.LightningModule):
             model.requires_grad_(True)
 
     def configure_model(self) -> None:
-        load_from_checkpoint = self._trainer is not None and self.trainer.ckpt_path is not None
+        is_zero3 = getattr(self.strategy, 'zero_stage_3', False)
 
-        if load_from_checkpoint:
-            logger.info('Constructing model')
+        if self.is_load_from_checkpoint:
+            logger.info('Construct un-initialized model')
             self.model = self._construct_model_from_config()
+        elif is_zero3:
+            logger.info('Construct un-initialized model')
+            self.model = self._construct_model_from_config()
+            logger.info('Load pretrained weights from disk')
+            state_dict = self._get_pretrained_weights() if self.global_rank == 0 else None
+            logger.info('Load pretrained weights into model')
+            self._zero3_load_state_dict_into_model(self.model, state_dict)
         else:
-            self.model = self._construct_model_and_load_pretrained_weights()
-        
-        self._call_patchers()
+            logger.info('Load pretrained model')
+            self.model = self._construct_model_from_pretrained()
 
-        self.extend_vocabs()
+        self._maybe_extend_vocabs()
+        self._call_patchers()
     
     def configure_optimizers(self):
         optimizer_config = {}
