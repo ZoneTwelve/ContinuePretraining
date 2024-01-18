@@ -19,7 +19,7 @@ def _decoder_layer_forward(self: LlamaDecoderLayer, *args, **kwargs):
     return outputs
 
 
-class LLaMAFP16Patcher(Patcher):
+class LlamaFP16Patcher(Patcher):
     def _validate(self, target: LlamaPreTrainedModel):
         assert isinstance(target, LlamaPreTrainedModel)
 
