@@ -1,7 +1,7 @@
-JOB_NAME=train
-# PARTITION=gpNCHC_H100
+JOB_NAME="cp-mistral-7b"
+PARTITION="gpNCHC_H100"
 # PARTITION=gp1d
-NODES=5
+NODES=2
 
 # export WANDB_MODE=disabled
 # export CUDA_LAUNCH_BLOCKING=1
@@ -9,10 +9,9 @@ NODES=5
 # export TORCH_DISTRIBUTED_DEBUG="DETAIL"
 
 SUBCOMMAND="fit"
-CONFIG="config/cp-34b/Yi-34B|data=l-v2.yaml"
+CONFIG="config/mistral-7b|tokenizer=ccw|data=m.yaml"
 VERSION="null"
 CKPT_PATH="null"
-LOAD_FULL_WEIGHTS=false
 
 
 COMMAND="
@@ -20,7 +19,7 @@ COMMAND="
         --config \"$CONFIG\"
         --ckpt_path \"$CKPT_PATH\"
         --trainer.logger.init_args.version \"$VERSION\"
-        --trainer.strategy.init_args.load_full_weights \"$LOAD_FULL_WEIGHTS\"
+        --trainer.num_nodes $NODES
 "
 
 SBATCH_ARGS=""

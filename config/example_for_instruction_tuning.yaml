@@ -1,6 +1,5 @@
 seed_everything: 42
 trainer:
-  num_nodes: ${oc.env:SLURM_NNODES}
   strategy: 
     class_path: EnhancedDeepSpeedStrategy
     init_args:
@@ -16,7 +15,7 @@ trainer:
       project: taide-sft-7b
       tags:
         - sft
-        - bf16
+        - fp16
       save_code: true
   callbacks:
     - class_path: LearningRateMonitor
@@ -68,3 +67,4 @@ data:
       num_workers: 4
 # float32_matmul_precision: medium
 # logging_level: DEBUG
+# save_config: false
