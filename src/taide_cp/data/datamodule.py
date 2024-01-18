@@ -62,7 +62,17 @@ class DataModule(L.LightningDataModule):
 
         return dataset_dict
 
-    def process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
+    def pre_process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
+        return dataset_dict
+    
+    def _maybe_split_dataset(self, dataset_dict: DatasetDict):
+        if self.config.validation_split is not None:
+            dataset_dict = dataset_dict['train'].train_test_split(self.config.validation_split, seed=42)
+            dataset_dict['validation'] = dataset_dict.pop('test')
+        return dataset_dict
+
+    def post_process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
+        dataset_dict = self._maybe_split_dataset(dataset_dict)
         return dataset_dict
         
     def prepare_data(self) -> None:
@@ -70,7 +80,7 @@ class DataModule(L.LightningDataModule):
             dataset_dict = self.load_data()
             if self.config.cleanup_cache_files:
                 dataset_dict.cleanup_cache_files()
-            self.process_data(dataset_dict)
+            self.pre_process_data(dataset_dict)
     
     def _get_dataloader(self, split: str):
         dataloader_class = DataLoader
@@ -89,22 +99,16 @@ class DataModule(L.LightningDataModule):
 
         return dataloader_class(**dataloader_kwargs)
     
-    def _maybe_split_validation_set(self, dataset_dict: DatasetDict):
-        if self.config.validation_split is not None:
-            dataset_dict = dataset_dict['train'].train_test_split(self.config.validation_split, seed=42)
-            dataset_dict['validation'] = dataset_dict.pop('test')
-        return dataset_dict
-
     def setup(self, stage: str | None = None) -> None:
         if self.config.dataset_path is None:
             dataset_dict = self.load_data()
-            dataset_dict = self.process_data(dataset_dict)
+            dataset_dict = self.pre_process_data(dataset_dict)
         else:
-            logger.info('Load processed data from disk')
+            logger.info('Load pre-processed data from disk')
             dataset_dict = load_from_disk(self.config.dataset_path)
             logger.info('Done')
 
-        self.dataset_dict = self._maybe_split_validation_set(dataset_dict)
+        self.dataset_dict = self.post_process_data(dataset_dict)
 
         mapping = {
             'train': 'train_dataloader',
@@ -118,10 +122,6 @@ class DataModule(L.LightningDataModule):
                 setattr(self, v, partial(self._get_dataloader, k))
             else:
                 setattr(self, v, getattr(super(), v))
-
-    def save_to_disk(self, dataset_path: str):
-        assert self.dataset_dict is not None
-        self.dataset_dict.save_to_disk(dataset_path, num_proc=self.config.num_proc)
 
     def train_dataloader(self): ...
 

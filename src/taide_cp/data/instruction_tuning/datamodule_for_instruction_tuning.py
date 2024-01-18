@@ -17,7 +17,7 @@ class DataModuleForInstructionTuning(DataModule):
     def __init__(self, config: InstructionTuningConfig) -> None:
         super().__init__(config)
  
-    def process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
+    def pre_process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
         dataset_dict = self.map_dataset_dict(
             dataset_dict,
             _apply_template,
