@@ -81,37 +81,30 @@ python scripts/main.py fit \
 
 #### 多節點訓練
 
-```sh
-sbatchx -j train --nodes 4 "python scripts/main.py fit --config \"config/XXX.yaml\""
-```
+請參考 [`shell_scripts/train.sh`](shell_scripts/train.sh)
 
-參考 [`shell_scripts/train.sh`](shell_scripts/train.sh)
-
-### [`scripts/cp/prepare_data_for_pre_training.py`](scripts/cp/prepare_data_for_pre_training.py)
+### [`scripts/pre_process_pre_training_data.py`](scripts/pre_process_pre_training_data.py)
 
 因為 TWCC 在多節點運算的時候，每個程序只能有 4 個 CPU 核心，不預先處理的話速度會非常慢，我們可以先利用 `srunx -g 8` 分配 32 顆 CPU 核心，再執行此腳本進行資料預處理
+記得 config 裡的 num_proc 要設定成對應的 CPU 核心數量
 
 ```sh
 srunx -g 8
 
-python scripts/cp/prepare_data_for_pre_training.py \
-    --dataset_kwargs="{'path': '...', 'data_dir': '...'}" \
-    --tokenizer_path="..." \
-    --dataset_path="..." \
-    --max_length=4096 \
-    --num_proc=32
+python scripts/pre_process_pre_training_data.py \
+    --config "config/XXX.yaml"
 ```
 
-### [`scripts/cp/convert_pl_to_hf.py`](scripts/cp/convert_pl_to_hf.py)
+### [`scripts/export_model.py`](scripts/export_model.py)
 
-把 Lightning 的存檔點轉換成 HuggingFace Transformers 的格式
+把 Lightning + DeepSpeed 的存檔點轉換成 HuggingFace Transformers 的格式
 
 ```sh
 # 根據 CPU RAM 的需求來選擇 GPU 的數量
 # 7B 的存檔點需要 90GB 以上的 RAM，因此通常會分配 2 顆 GPU
 srunx -g 2 
 
-python scripts/cp/convert_pl_to_hf.py \
+python scripts/export_model.py \
     --checkpoint_path="XXX.ckpt" \
     --output_path="checkpoints/XXX"
 ```

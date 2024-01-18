@@ -1,11 +1,15 @@
 import logging
+import math
+import random
 
-from datasets import DatasetDict
-from transformers import PreTrainedTokenizerBase
+from datasets import Dataset, DatasetDict, concatenate_datasets
+from tqdm.auto import tqdm
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
 from ..datamodule import DataModule
 from .datacollator_for_pre_training import DataCollatorForPreTraining
-from .datamodule_for_pre_training_config import ConcatMethod, DataModuleForPreTrainingConfig
+from .datamodule_for_pre_training_config import (
+    ConcatMethod, DataModuleForPreTrainingConfig)
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +21,10 @@ class DataModuleForPreTraining(DataModule):
     def __init__(self, config: DataModuleForPreTrainingConfig) -> None:
         super().__init__(config)
 
-    def _tokenize(self, dataset_dict: DatasetDict):
-        return self.map_dataset_dict(
+    def pre_process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
+        logger.info('Tokenize')
+        dataset_dict = dataset_dict.shuffle(seed=42)
+        dataset_dict = self.map_dataset_dict(
             dataset_dict,
             _tokenize,
             batched=True,
@@ -28,16 +34,27 @@ class DataModuleForPreTraining(DataModule):
             desc='Tokenize'
         )
 
-    def process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
-        global_rank = self.trainer.global_rank if self.trainer else 0
+        if self.config.stride is not None:
+            logger.info('Truncate and stride')
+            dataset_dict = dataset_dict.map(
+                _stride,
+                batched=True,
+                fn_kwargs=dict(
+                    max_length=self.config.max_length,
+                    stride=self.config.stride
+                ),
+                num_proc=self.config.num_proc,
+                desc='Truncate and stride'
+            )
 
-        logger.debug(f'[rank: {global_rank}] Tokenize')
-        dataset_dict = self._tokenize(dataset_dict)
-
-        logger.debug(f'[rank: {global_rank}] Concat')
         if self.config.concat_method == ConcatMethod.CONCAT_AND_TRUNCATE:
-            dataset_dict = self.map_dataset_dict(
-                dataset_dict,
+            logger.info('Concat and truncate')
+            if self.config.stride is not None:
+                dataset_dict = dataset_dict.shuffle(seed=42)
+                dataset_dict = dataset_dict.flatten_indices(num_proc=self.config.num_proc)
+            
+            dataset_dict = dataset_dict.sort('source')
+            dataset_dict = dataset_dict.map(
                 _concat_and_truncate,
                 batched=True,
                 batch_size=100000,
@@ -48,54 +65,112 @@ class DataModuleForPreTraining(DataModule):
     
         return dataset_dict
     
-    def count_tokens(self) -> dict[str, int]:
-        dataset_dict = super().load_data()
-        dataset_dict = self._tokenize(dataset_dict)
-        dataset_dict = self.map_dataset_dict(
-            dataset_dict,
-            _count_tokens,
-            batched=True,
-            batch_size=100000,
-            remove_columns='input_ids',
-            num_proc=self.config.num_proc,
-            desc='Count tokens'
-        )
-        return {k: sum(x['tokens'] for x in v) for k, v in dataset_dict.items()}
+    def _partition_by_source(self, dataset: Dataset) -> dict[str, Dataset]:
+        source_to_indices = {}
+        progress = tqdm(total=len(dataset), desc='Partition by source')
+        i = 0
+        for batch in dataset.select_columns('source').iter(1000):
+            for source in batch['source']:
+                indices = source_to_indices.setdefault(source, [])
+                indices.append(i)
+                i += 1 
+                progress.update()
+        return {source: dataset.select(indices) for source, indices in source_to_indices.items()}
+    
+    def sample_data(self, dataset_dict: DatasetDict) -> DatasetDict:
+        r = random.Random(42)
+        for k, dataset in dataset_dict.items():
+            if k == 'train':
+                dataset_list = []
+                for source, dataset in self._partition_by_source(dataset).items():
+                    sample_rate = self.config.sample_rate.get(source, 1.0)
+                    decimal, integer = math.modf(sample_rate)
+                    dataset_list += [dataset] * int(integer)
+                    if decimal > 0.0:
+                        n = len(dataset)
+                        indices = r.sample(list(range(n)), k=int(n * decimal))
+                        dataset_list += [dataset.select(indices)]
+                dataset_dict[k] = concatenate_datasets(dataset_list)
+        return dataset_dict
+    
+    def post_process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
+        dataset_dict = super().post_process_data(dataset_dict)
+        dataset_dict = self.sample_data(dataset_dict)
+        return dataset_dict
 
 
-def _tokenize(batch: dict[str, list[str]], tokenizer: PreTrainedTokenizerBase):
-    new_batch = tokenizer(
-        [x for x in batch['text'] if x],
+def _tokenize(batch: dict[str, list[str]], tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast):
+    batch_text = [text for text in batch['text'] if text]
+    batch_source = [source for text, source in zip(batch['text'], batch['source']) if text] if 'source' in batch else [None] * len(batch_text)
+    batch_input_ids: list[list[int]] = tokenizer(
+        batch_text,
         add_special_tokens=False,
         return_token_type_ids=False,
         return_attention_mask=False,
         verbose=False
-    )
+    )['input_ids']
 
-    for x in new_batch['input_ids']:        
-        x.insert(0, tokenizer.bos_token_id)
-        x.append(tokenizer.eos_token_id)
+    batch_length = []
+    for input_ids in batch_input_ids:
+        input_ids.insert(0, tokenizer.bos_token_id)
+        input_ids.append(tokenizer.eos_token_id)
+        batch_length.append(len(input_ids))
+    
+    return {
+        'input_ids': batch_input_ids,
+        'source': batch_source,
+        'length': batch_length
+    }
 
-    return new_batch
+
+def _stride(batch: dict[str, list[int]], max_length: int, stride: int):
+    batch_input_ids = []
+    batch_source = []
+    batch_length = []
+    for source, input_ids in zip(batch['source'], batch['input_ids']):
+        for i in range(0, len(input_ids), stride):
+            t = input_ids[i:i + max_length]
+            batch_input_ids.append(t)
+            batch_length.append(len(t))
+            batch_source.append(source)
+
+    return {
+        'input_ids': batch_input_ids,
+        'source': batch_source,
+        'length': batch_length
+    }
 
 
 def _concat_and_truncate(batch: dict[str, list[int]], max_length: int):
-    new_batch = {'input_ids': []}
-    
-    input_ids = []
-    for x in batch['input_ids']:
-        input_ids += x
-        while len(input_ids) >= max_length:
-            new_batch['input_ids'] += [input_ids[:max_length]]
-            input_ids[:max_length] = []
+    batch_input_ids = []
+    batch_source = []
+    batch_length = []
 
-    if input_ids:
-        new_batch['input_ids'] += [input_ids]
-    
-    return new_batch
- 
+    current_source = batch['source'][0]
+    current_input_ids = []
+    for source, input_ids in zip(batch['source'], batch['input_ids']):
+        if source != current_source:
+            if current_input_ids:
+                batch_input_ids.append(current_input_ids)
+                batch_source.append(current_source)
+                batch_length.append(len(current_input_ids))
+                current_input_ids = []
+            current_source = source
 
-def _count_tokens(batch: dict[str, list[list[int]]]):
+        current_input_ids += input_ids
+        while len(current_input_ids) >= max_length:
+            batch_input_ids.append(current_input_ids[:max_length])
+            batch_source.append(current_source)
+            batch_length.append(len(current_input_ids[:max_length]))
+            current_input_ids[:max_length] = []
+    
+    if current_input_ids:
+        batch_input_ids.append(current_input_ids)
+        batch_source.append(current_source)
+        batch_length.append(len(current_input_ids))
+
     return {
-        'tokens': [sum(len(x) for x in batch['input_ids'])]
+        'input_ids': batch_input_ids,
+        'source': batch_source,
+        'length': batch_length
     }
