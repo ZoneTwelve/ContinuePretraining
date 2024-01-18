@@ -61,8 +61,8 @@ model:
         num_warmup_steps: 0
         min_lr_factor: 0.1
       # patchers:
-      #   - class_path: LLaMAFP16Patcher
-      #   - class_path: LLaMAOptimizationPatcher
+      #   - class_path: LlamaFP16Patcher
+      #   - class_path: LlamaOptimizationPatcher
 data:
   class_path: DataModuleForPreTraining
   init_args:
