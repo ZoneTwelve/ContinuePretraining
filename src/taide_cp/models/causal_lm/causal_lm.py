@@ -66,7 +66,11 @@ class LitCausalLM(L.LightningModule):
         self.save_hyperparameters({'config': config})
 
         self.config = config
-        self.model_config = self.model_config_class.from_pretrained(self.config.model_path, **config.model_kwargs)
+        self.model_config, self.config.model_kwargs = self.model_config_class.from_pretrained(
+            self.config.model_path,
+            return_unused_kwargs=True,
+            **config.model_kwargs
+        )
         self.tokenizer = self.tokenizer_class.from_pretrained(self.config.tokenizer_path, **config.tokenizer_kwargs)
 
         assert self.config.extend_vocab or len(self.tokenizer) <= self.model_config.vocab_size
