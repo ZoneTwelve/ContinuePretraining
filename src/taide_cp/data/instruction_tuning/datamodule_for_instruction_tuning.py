@@ -10,6 +10,71 @@ from .instruction_tuning_config import (ConcatMethod, InstructionTuningConfig,
                                         OverlongHandlingMethod)
 
 
+class DataModuleForInstructionTuning(DataModule):
+    config: InstructionTuningConfig
+    datacollator_class = DataCollatorForInstructionTuning
+
+    def __init__(self, config: InstructionTuningConfig) -> None:
+        super().__init__(config)
+ 
+    def process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
+        dataset_dict = self.map_dataset_dict(
+            dataset_dict,
+            _apply_template,
+            batched=True,
+            remove_columns=True,
+            fn_kwargs=dict(
+                prompt_template=self.config.prompt_template,
+                response_template=self.config.response_template
+            ),
+            num_proc=self.config.num_proc,
+            desc='Apply template'
+        )
+
+        dataset_dict = self.map_dataset_dict(
+            dataset_dict,
+            _tokenize,
+            batched=True,
+            remove_columns=['prompt', 'response'],
+            fn_kwargs=dict(tokenizer=self.config.tokenizer),
+            num_proc=self.config.num_proc,
+            desc='Tokenize'
+        )
+
+        if self.config.overlong_handling_method == OverlongHandlingMethod.DROP:
+            dataset_dict = self.map_dataset_dict(
+                dataset_dict,
+                _drop_overlong,
+                batched=True,
+                fn_kwargs=dict(max_length=self.config.max_length),
+                num_proc=self.config.num_proc,
+                desc='Drop overlong'
+            )
+        elif self.config.overlong_handling_method == OverlongHandlingMethod.TRUNCATE:
+            dataset_dict = self.map_dataset_dict(
+                dataset_dict,
+                _truncate_overlong,
+                batched=True,
+                fn_kwargs=dict(max_length=self.config.max_length),
+                num_proc=self.config.num_proc,
+                desc='Truncate overlong'
+            )
+        
+        if self.config.concat_method == ConcatMethod.GROUP_BY_LENGTH:
+            dataset_dict = self.map_dataset_dict(
+                dataset_dict,
+                _group_by_length,
+                batched=True,
+                batch_size=10000,
+                remove_columns=['input_ids', 'prompt_length'],
+                fn_kwargs=dict(max_length=self.config.max_length),
+                num_proc=self.config.num_proc,
+                desc='Group by length'
+            )
+    
+        return dataset_dict
+
+
 def _apply_template(batch: dict[str, list[str]], prompt_template: Template, response_template: Template):
     batch: list[dict[str, str]] = [dict(zip(batch, x)) for x in zip(*batch.values())]
 
@@ -105,69 +170,3 @@ def _group_by_length(batch: dict[str, list[list[int]]], max_length: int):
         new_batch['grouped_input_ids'].append(grouped_input_ids)
         new_batch['grouped_prompt_length'].append(grouped_prompt_length)
     return new_batch
-
-
-class DataModuleForInstructionTuning(DataModule):
-    config: InstructionTuningConfig
-
-    def __init__(self, config: InstructionTuningConfig) -> None:
-        super().__init__(config)
-
-        self.datacollator = DataCollatorForInstructionTuning(config)
- 
-    def process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
-        dataset_dict = self.map_dataset_dict(
-            dataset_dict,
-            _apply_template,
-            batched=True,
-            remove_columns=True,
-            fn_kwargs=dict(
-                prompt_template=self.config.prompt_template,
-                response_template=self.config.response_template
-            ),
-            num_proc=self.config.num_proc,
-            desc='Apply template'
-        )
-
-        dataset_dict = self.map_dataset_dict(
-            dataset_dict,
-            _tokenize,
-            batched=True,
-            remove_columns=['prompt', 'response'],
-            fn_kwargs=dict(tokenizer=self.config.tokenizer),
-            num_proc=self.config.num_proc,
-            desc='Tokenize'
-        )
-
-        if self.config.overlong_handling_method == OverlongHandlingMethod.DROP:
-            dataset_dict = self.map_dataset_dict(
-                dataset_dict,
-                _drop_overlong,
-                batched=True,
-                fn_kwargs=dict(max_length=self.config.max_length),
-                num_proc=self.config.num_proc,
-                desc='Drop overlong'
-            )
-        elif self.config.overlong_handling_method == OverlongHandlingMethod.TRUNCATE:
-            dataset_dict = self.map_dataset_dict(
-                dataset_dict,
-                _truncate_overlong,
-                batched=True,
-                fn_kwargs=dict(max_length=self.config.max_length),
-                num_proc=self.config.num_proc,
-                desc='Truncate overlong'
-            )
-        
-        if self.config.concat_method == ConcatMethod.GROUP_BY_LENGTH:
-            dataset_dict = self.map_dataset_dict(
-                dataset_dict,
-                _group_by_length,
-                batched=True,
-                batch_size=10000,
-                remove_columns=['input_ids', 'prompt_length'],
-                fn_kwargs=dict(max_length=self.config.max_length),
-                num_proc=self.config.num_proc,
-                desc='Group by length'
-            )
-    
-        return dataset_dict

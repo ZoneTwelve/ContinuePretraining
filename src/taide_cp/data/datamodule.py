@@ -1,5 +1,4 @@
 import logging
-from dataclasses import KW_ONLY
 from functools import partial
 from typing import Any, Callable
 
@@ -13,8 +12,8 @@ from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import _BaseDataLoaderIter
 from transformers import PreTrainedTokenizerBase
 
-from ..utils.config import ConfigBase
 from .datacollator import DataCollator
+from .datamodule_config import DataModuleConfig
 
 logger = logging.getLogger(__name__)
 
@@ -38,23 +37,8 @@ class ResumableDataLoader(DataLoader):
         return (x for i, x in enumerate(super().__iter__()) if i >= current_step)
 
 
-class DataModuleConfig(ConfigBase):
-    _: KW_ONLY
-    dataset_kwargs: dict | None = None
-    validation_split: int | float | None = None
-    dataset_path: str | None = None
-    batch_size: int = 1
-    num_proc: int | None = None
-    num_workers: int = 0
-    pin_memory: bool = True
-    cleanup_cache_files: bool = False
-    prepare_data_per_node: bool = False
-
-    def __post_init__(self):
-        assert self.dataset_kwargs is not None or self.dataset_path is not None
-
 class DataModule(L.LightningDataModule):
-    datacollator: DataCollator | None = None
+    datacollator_class: type[DataCollator] | None = None
 
     def __init__(self, config: DataModuleConfig) -> None:
         super().__init__()
@@ -62,8 +46,8 @@ class DataModule(L.LightningDataModule):
         self.save_hyperparameters({'datamodule_config': config})
 
         self.config = config
+        self.datacollator = self.datacollator_class(config) if self.datacollator_class is not None else None
         self.prepare_data_per_node = config.prepare_data_per_node
-        
         self._resume = None
 
     def load_data(self) -> DatasetDict:

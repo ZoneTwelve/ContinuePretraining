@@ -8,14 +8,14 @@ from .instruction_tuning_config import ConcatMethod, InstructionTuningConfig
 
 
 class DataCollatorForInstructionTuning(DataCollator):
+    config: InstructionTuningConfig
+    
     @property
     def tokenizer(self):
         return self.config.tokenizer
 
     def __init__(self, config: InstructionTuningConfig):
-        super().__init__()
-
-        self.config = config
+        super().__init__(config)
 
     def _merge_grouped(self, x: dict[str, list]) -> tuple[list[int], list[int]]:
         x = list(zip(x['grouped_input_ids'], x['grouped_prompt_length']))
