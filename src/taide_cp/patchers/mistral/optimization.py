@@ -1,10 +1,10 @@
-from transformers.models.llama.modeling_llama import (LlamaPreTrainedModel,
-                                                      LlamaRMSNorm)
+from transformers.models.mistral.modeling_mistral import (
+    MistralPreTrainedModel, MistralRMSNorm)
 
 from ..patcher import Patcher
 
 
-class LlamaOptimizationPatcher(Patcher):
+class MistralOptimizationPatcher(Patcher):
     def __init__(
         self,
         fused_rms_norm: bool = True
@@ -13,16 +13,16 @@ class LlamaOptimizationPatcher(Patcher):
 
         self.fuesed_rms_norm = fused_rms_norm
 
-    def _validate(self, target: LlamaPreTrainedModel):
-        assert isinstance(target, LlamaPreTrainedModel)
+    def _validate(self, target: MistralPreTrainedModel):
+        assert isinstance(target, MistralPreTrainedModel)
     
-    def patch(self, target: LlamaPreTrainedModel):
+    def patch(self, target: MistralPreTrainedModel):
         for n, m in target.named_modules():           
-            if self.fuesed_rms_norm and isinstance(m, LlamaRMSNorm):
+            if self.fuesed_rms_norm and isinstance(m, MistralRMSNorm):
                 self.patch_module(target, n, _get_fused_rms_norm(m, target.config.hidden_size))
 
 
-def _get_fused_rms_norm(module: LlamaRMSNorm, normalized_shape: int):
+def _get_fused_rms_norm(module: MistralRMSNorm, normalized_shape: int):
     try:
         from apex.normalization import FusedRMSNorm
     except ImportError:
