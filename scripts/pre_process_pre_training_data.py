@@ -1,6 +1,6 @@
 import os
+from collections import Counter
 
-import multiprocess
 from datasets import DatasetDict
 from tqdm.auto import tqdm
 
@@ -14,26 +14,26 @@ from taide_cp.patchers import *
 def count_tokens(dataset_dict: DatasetDict) -> dict[str, int]:
     tokens = {}
     for k, dataset in dataset_dict.items():
-        tokens[k] = 0
-        dataset = dataset.select_columns('length')
+        counter = Counter()
+        dataset = dataset.select_columns(['source', 'length'])
         progress = tqdm(total=len(dataset), desc=f'Count tokens ({k})')
         for batch in dataset.iter(1000):
-            tokens[k] += sum(batch['length'])
-            progress.update(len(batch['length']))
+            batch_size = len(batch['length'])
+            for source, length in zip(batch['source'], batch['length']):
+                counter[source] += length
+                counter['all'] += length
+            tokens[k] = counter
+            progress.set_postfix(tokens=counter['all'])
+            progress.update(batch_size)
     return tokens
 
 
 def main():
-    multiprocess.set_start_method('spawn')
-
     cli = TaideCPLightningCLI(run=False)
 
     datamodule: DataModuleForPreTraining = cli.datamodule
     config = datamodule.config
 
-    if config.num_proc > 56:
-        os.environ['OPENBLAS_NUM_THREADS'] = '1'
-    
     if config.tokenizer.is_fast:
         os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
