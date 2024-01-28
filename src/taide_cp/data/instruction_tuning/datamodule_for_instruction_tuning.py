@@ -1,51 +1,39 @@
-from string import Template
-
 from datasets import DatasetDict
 from transformers import PreTrainedTokenizerBase
 
 from ..datamodule import DataModule
 from .datacollator_for_instruction_tuning import \
     DataCollatorForInstructionTuning
-from .instruction_tuning_config import (ConcatMethod, InstructionTuningConfig,
-                                        OverlongHandlingMethod)
+from .datamodule_for_instruction_tuning_config import (ConcatMethod,
+                                                       DataModuleForInstructionTuningConfig,
+                                                       OverlongHandlingMethod)
 
 
 class DataModuleForInstructionTuning(DataModule):
-    config: InstructionTuningConfig
+    config: DataModuleForInstructionTuningConfig
     datacollator_class = DataCollatorForInstructionTuning
 
-    def __init__(self, config: InstructionTuningConfig) -> None:
+    def __init__(self, config: DataModuleForInstructionTuningConfig) -> None:
         super().__init__(config)
  
     def pre_process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
         dataset_dict = self.map_dataset_dict(
             dataset_dict,
-            _apply_template,
-            batched=True,
+            _apply_template_and_tokenize,
+            input_columns='messages',
             remove_columns=True,
             fn_kwargs=dict(
-                prompt_template=self.config.prompt_template,
-                response_template=self.config.response_template
+                tokenizer=self.config.tokenizer,
+                chat_template=self.config.chat_template,
             ),
             num_proc=self.config.num_proc,
-            desc='Apply template'
-        )
-
-        dataset_dict = self.map_dataset_dict(
-            dataset_dict,
-            _tokenize,
-            batched=True,
-            remove_columns=['prompt', 'response'],
-            fn_kwargs=dict(tokenizer=self.config.tokenizer),
-            num_proc=self.config.num_proc,
-            desc='Tokenize'
+            desc='Apply template and tokenize'
         )
 
         if self.config.overlong_handling_method == OverlongHandlingMethod.DROP:
-            dataset_dict = self.map_dataset_dict(
-                dataset_dict,
+            dataset_dict = dataset_dict.filter(
                 _drop_overlong,
-                batched=True,
+                input_columns='input_ids',
                 fn_kwargs=dict(max_length=self.config.max_length),
                 num_proc=self.config.num_proc,
                 desc='Drop overlong'
@@ -66,7 +54,7 @@ class DataModuleForInstructionTuning(DataModule):
                 _group_by_length,
                 batched=True,
                 batch_size=10000,
-                remove_columns=['input_ids', 'prompt_length'],
+                remove_columns=True,
                 fn_kwargs=dict(max_length=self.config.max_length),
                 num_proc=self.config.num_proc,
                 desc='Group by length'
@@ -75,65 +63,48 @@ class DataModuleForInstructionTuning(DataModule):
         return dataset_dict
 
 
-def _apply_template(batch: dict[str, list[str]], prompt_template: Template, response_template: Template):
-    batch: list[dict[str, str]] = [dict(zip(batch, x)) for x in zip(*batch.values())]
-
-    new_batch = {
-        'prompt': [],
-        'response': [],
-    }
-    
-    for x in batch:
-        p = prompt_template.safe_substitute(**x)
-        r = response_template.safe_substitute(**x)
-
-        new_batch['prompt'] += [p]
-        new_batch['response'] += [r]
-
-    return new_batch
-
-def _tokenize(batch: dict[str, list[str]], tokenizer: PreTrainedTokenizerBase):
-    batch: list[dict[str, str]] = [dict(zip(batch, x)) for x in zip(*batch.values())]
-
-    batch_prompt = []
-    batch_prompt_response = []
-    for x in batch:
-        batch_prompt += [x['prompt']]
-        batch_prompt_response += [x['prompt'] + x['response']]
-    
-    tokenizer_kwargs = dict(
-        add_special_tokens=False,
-        return_token_type_ids=False,
-        return_attention_mask=False,
-        verbose=False
-    )
-    prompt_length = tokenizer(batch_prompt, return_length=True, **tokenizer_kwargs)['length']
-    input_ids = tokenizer(batch_prompt_response, **tokenizer_kwargs)['input_ids']
+def _apply_template_and_tokenize(messages: list[dict[str, str]], tokenizer: PreTrainedTokenizerBase, chat_template: str | None = None):
+    input_ids = []
+    labels = []
+    for message in messages:
+        text = tokenizer.apply_chat_template(
+            [message],
+            chat_template=chat_template,
+            add_generation_prompt=False,
+            tokenize=False
+        )
+        # 這裡將同一筆資料分多次 tokenize，為保證跟一次 tokenize 全部的結果相同
+        # 先在前面加一個 token，tokenize 後再移除掉
+        text = tokenizer.bos_token + text
+        current_input_ids = tokenizer.encode(text, add_special_tokens=False)
+        current_input_ids = current_input_ids[1:]
+        
+        if message['role'] in ['system', 'user']:
+            input_ids += current_input_ids
+            labels += [-100] * len(current_input_ids)
+        elif message['role'] == 'assistant':
+            input_ids += current_input_ids
+            labels += current_input_ids
+        else:
+            raise ValueError(f"Unknown role: `{message['role']}`")
 
     return {
         'input_ids': input_ids,
-        'prompt_length': prompt_length
+        'labels': labels
     }
 
-def _drop_overlong(batch: dict[str, list], max_length: int):
-    ids_to_drop = []
-    for i, x in enumerate(batch['input_ids']):
-        if len(x) > max_length:
-            ids_to_drop.append(i)
-    
-    for i in sorted(ids_to_drop, reverse=True):
-        del batch['input_ids'][i]
-        del batch['prompt_length'][i]
-    return batch
+
+def _drop_overlong(input_ids: list[int], max_length: int):
+    return len(input_ids) <= max_length
+
 
 def _truncate_overlong(batch: dict[str, list], max_length: int):
-    for i, x in enumerate(batch['input_ids']):
-        if len(x) > max_length:
-            x[max_length:] = []
-
-            if batch['prompt_length'][i] > max_length:
-                batch['prompt_length'][i] = max_length
+    for input_ids, labels in zip(batch['input_ids'], batch['labels']):
+        if len(input_ids) > max_length:
+            input_ids[max_length:] = []
+            labels[max_length:] = []
     return batch
+
 
 def _group_indices_by_length(lengths: list[int], max_length: int) -> list[list[int]]:
     groups = []
@@ -154,19 +125,21 @@ def _group_indices_by_length(lengths: list[int], max_length: int) -> list[list[i
     
     return groups
 
+
 def _group_by_length(batch: dict[str, list[list[int]]], max_length: int):
-    new_batch = {
-        'grouped_input_ids': [],
-        'grouped_prompt_length': [],
-    }
+    grouped_input_ids = []
+    grouped_labels = []
 
     groups = _group_indices_by_length([len(x) for x in batch['input_ids']], max_length)
     for group in groups:
-        grouped_input_ids = []
-        grouped_prompt_length = []
+        current_grouped_input_ids = []
+        current_grouped_labels = []
         for i in group:
-            grouped_input_ids.append(batch['input_ids'][i])
-            grouped_prompt_length.append(batch['prompt_length'][i])
-        new_batch['grouped_input_ids'].append(grouped_input_ids)
-        new_batch['grouped_prompt_length'].append(grouped_prompt_length)
-    return new_batch
+            current_grouped_input_ids.append(batch['input_ids'][i])
+            current_grouped_labels.append(batch['labels'][i])
+        grouped_input_ids.append(current_grouped_input_ids)
+        grouped_labels.append(current_grouped_labels)
+    return {
+        'grouped_input_ids': grouped_input_ids,
+        'grouped_labels': grouped_labels
+    }

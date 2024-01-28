@@ -1,4 +1,4 @@
 from .datacollator_for_instruction_tuning import \
     DataCollatorForInstructionTuning
 from .datamodule_for_instruction_tuning import DataModuleForInstructionTuning
-from .instruction_tuning_config import InstructionTuningConfig
+from .datamodule_for_instruction_tuning_config import DataModuleForInstructionTuningConfig
