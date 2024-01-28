@@ -3,7 +3,7 @@ import os
 import fire
 import torch
 
-from taide_cp.models import LitCausalLMConfig, LitLlamaForCausalLM
+from taide_cp.models import LitCausalLMConfig, LitCausalLM
 from taide_cp.utils.deepspeed import \
     get_lightning_checkpoint_from_zero_checkpoint
 
@@ -53,9 +53,12 @@ def main(
 
     config: LitCausalLMConfig = checkpoint['hyper_parameters']['config']
     config.patchers.clear()
-    model = LitLlamaForCausalLM(config)
+    model = LitCausalLM(config)
     model.configure_model()
     model.load_state_dict(checkpoint['state_dict'], assign=True)
+    model.model.generation_config.bos_token_id = model.tokenizer.bos_token_id
+    model.model.generation_config.eos_token_id = model.tokenizer.eos_token_id
+    model.model.generation_config.pad_token_id = model.tokenizer.pad_token_id
     model.model.save_pretrained(output_path)
     model.tokenizer.save_pretrained(output_path)
 
