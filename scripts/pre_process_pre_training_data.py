@@ -2,6 +2,7 @@ import os
 from collections import Counter
 
 from datasets import DatasetDict
+from tabulate import tabulate
 from tqdm.auto import tqdm
 
 from taide_cp.cli import TaideCPLightningCLI
@@ -11,8 +12,8 @@ from taide_cp.models import *
 from taide_cp.patchers import *
 
 
-def count_tokens(dataset_dict: DatasetDict) -> dict[str, int]:
-    tokens = {}
+def get_tokens_table(dataset_dict: DatasetDict) -> str:
+    tokens: dict[str, Counter[str, int]] = {}
     for k, dataset in dataset_dict.items():
         counter = Counter()
         dataset = dataset.select_columns(['source', 'length'])
@@ -25,7 +26,17 @@ def count_tokens(dataset_dict: DatasetDict) -> dict[str, int]:
             tokens[k] = counter
             progress.set_postfix(tokens=counter['all'])
             progress.update(batch_size)
-    return tokens
+    progress.clear()
+    
+    return tabulate(
+        [
+            [split, source, tokens] 
+            for split, counter in tokens.items()
+            for source, tokens in counter.most_common()
+        ],
+        headers=['Split', 'Source', 'Tokens'],
+        tablefmt='orgtbl'
+    )
 
 
 def main():
@@ -42,14 +53,18 @@ def main():
     dataset_dict = datamodule.pre_process_data(dataset_dict)
     print(dataset_dict)
     dataset_dict.save_to_disk(config.dataset_path)
+    original_tokens_table = get_tokens_table(dataset_dict)
 
-    original_tokens = count_tokens(dataset_dict)
     dataset_dict = datamodule.post_process_data(dataset_dict)
     print(dataset_dict)
-    resampled_tokens = count_tokens(dataset_dict)
 
-    print('Original Tokens', original_tokens)
-    print('Resampled Tokens', resampled_tokens)
+    sampled_tokens_table = get_tokens_table(dataset_dict)
+
+    print('Original Tokens:')
+    print(original_tokens_table)
+    print()
+    print('Sampled Tokens:')
+    print(sampled_tokens_table)
 
 
 if __name__ == '__main__':
