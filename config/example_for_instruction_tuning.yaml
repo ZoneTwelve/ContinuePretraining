@@ -11,8 +11,7 @@ trainer:
     init_args:
       name: example_for_instruction_tuning
       save_dir: logs
-      entity: tvllm
-      project: taide-sft-7b
+      project: taide-cp-example
       tags:
         - sft
         - fp16
@@ -33,7 +32,7 @@ trainer:
   gradient_clip_val: 1.0
   gradient_clip_algorithm: norm
 model:
-  class_path: LitLlamaForCausalLM
+  class_path: LitCausalLM
   init_args:
     config:
       model_path: <MODEL_PATH>
@@ -48,21 +47,19 @@ model:
         num_warmup_steps: 0
         min_lr_factor: 0.1
       # patchers:
-      #   - class_path: LlamaFP16Patcher
       #   - class_path: LlamaOptimizationPatcher
+      #   - class_path: LlamaFP16Patcher
 data:
   class_path: DataModuleForInstructionTuning
   init_args:
     config:
       dataset_kwargs:
-        path: TLLM/ft-balance-100k
-        name: "20231020"
+        path: TLLM/ft-balance-mixed
       max_length: 4096
-      prompt_template: <s>[INST] $prompt [/INST]
-      response_template: $response</s>
-      concat_method: NO_CONCAT
-      pad_to_multiple_of: 64
-      batch_size: 8
+      chat_template: llama
+      concat_method: GROUP_BY_LENGTH
+      pad_to_multiple_of: 8
+      batch_size: 4
       num_proc: 4
       num_workers: 4
 # float32_matmul_precision: medium
