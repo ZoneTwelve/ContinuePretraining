@@ -35,14 +35,15 @@ class DataModuleForInstructionTuningConfig(DataModuleConfig):
 
         if self.chat_template is None:
             logger.info(f'`chat_template` is not set, default template of the tokenizer will be used.')
+        elif Path(self.chat_template).exists():
+            logger.info(f'Found template file at `{self.chat_template}`.')
+            with open(self.chat_template) as f:
+                self.chat_template = f.read()
+        elif self.chat_template in PREDEFINED_TEMPLATES:
+            logger.info(f'Using predefined template `{self.chat_template}`.')
+            self.chat_template = PREDEFINED_TEMPLATES[self.chat_template]
         else:
-            if Path(self.chat_template).exists():
-                logger.info(f'Found template file at `{self.chat_template}`.')
-                with open(self.chat_template) as f:
-                    self.chat_template = f.read()
-            elif self.chat_template in PREDEFINED_TEMPLATES:
-                logger.info(f'Using predefined template `{self.chat_template}`.')
-                self.chat_template = PREDEFINED_TEMPLATES[self.chat_template]
+            logger.info('Treat `chat_template` as a template directly.')
 
         self.overlong_handling_method = OverlongHandlingMethod(self.overlong_handling_method)
         self.concat_method = ConcatMethod(self.concat_method)
