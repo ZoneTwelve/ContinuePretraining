@@ -39,7 +39,7 @@ class LlamaOptimizationPatcher(Patcher):
                 self.patch_method(m.forward, _llama_for_causal_lm_forward)
             
             if self.fuesed_rms_norm and isinstance(m, LlamaRMSNorm):
-                self.patch_module(target, n, _get_fused_rms_norm(m, target.config.hidden_size))
+                self.patch_method(m.forward, _llama_rms_norm_forward)
 
             if self.fused_rotary_embedding:
                 ATTENTION_FORWARD_FN_MAPPING = {
@@ -93,15 +93,14 @@ def _llama_for_causal_lm_forward(
     return outputs
 
 
-def _get_fused_rms_norm(module: LlamaRMSNorm, hidden_size: int):
-    from flash_attn.ops.triton.layer_norm import RMSNorm
-
-    fused_rms_norm = RMSNorm(
-        hidden_size=hidden_size,
-        eps=module.variance_epsilon
+def _llama_rms_norm_forward(self: LlamaRMSNorm, x: torch.Tensor):
+    from flash_attn.ops.triton.layer_norm import rms_norm_fn
+    return rms_norm_fn(
+        x,
+        weight=self.weight,
+        bias=None,
+        eps=self.variance_epsilon
     )
-    fused_rms_norm.weight = module.weight
-    return fused_rms_norm
 
 
 def _set_cos_sin_cache(self: LlamaRotaryEmbedding, seq_len: int, device: torch.device, dtype: torch.dtype):
