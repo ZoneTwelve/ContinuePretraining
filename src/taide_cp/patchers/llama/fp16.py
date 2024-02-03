@@ -27,3 +27,4 @@ class LlamaFP16Patcher(Patcher):
         for module in target.modules():
             if isinstance(module, LlamaDecoderLayer):
                 self.patch_method(module.forward, _decoder_layer_forward)
+        return target

@@ -14,22 +14,23 @@ dependencies:
   - conda-forge::gcc=8
   - conda-forge::pkg-config
   - pip:
-    - accelerate==0.25.0
-    - datasets==2.15.0
-    - deepspeed==0.12.5
+    - accelerate
+    - datasets
+    - deepspeed
     - fire
-    - flash-attn==2.3.6
+    - flash-attn --no-build-isolation --no-cache
     - ipykernel
     - ipywidgets
     - jsonargparse[signatures]
-    - lightning==2.1.2
+    - lightning
     - omegaconf
-    - optimum==1.16.1
-    - peft==0.7.1
+    - optimum
+    - peft
     - protobuf
     - safetensors
     - sentencepiece
     - tokenizers
-    - transformers==4.36.2
+    - transformers
+    - triton
     - wandb
     - -e ..

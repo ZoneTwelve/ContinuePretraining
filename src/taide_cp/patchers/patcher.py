@@ -8,7 +8,7 @@ import functools
 T = TypeVar('T')
 
 class Patcher(ABC):
-    def patch_method(self, method: MethodType, patched_method: Callable):
+    def patch_method(self, method: MethodType, patched_method: Callable) -> None:
         target = method.__self__
         name = method.__name__
         assert method.__func__ is getattr(target.__class__, name), f'The method `{method.__qualname__}` seems to be patched already.'
@@ -16,7 +16,7 @@ class Patcher(ABC):
         patched_method = MethodType(patched_method, target)
         setattr(target, name, patched_method)
 
-    def unpatch_method(self, method: MethodType):
+    def unpatch_method(self, method: MethodType) -> None:
         target = method.__self__
         name = method.__name__
 
@@ -25,28 +25,40 @@ class Patcher(ABC):
         if method.__func__ is not original_method:
             setattr(target, name, original_method)
 
-    def patch_module(self, target: Any, module_path: str, module: Any):
+    def patch_module(self, target: Any, module_path: str, module: Any) -> None:
         rsetattr(target, module_path, module)
     
-    def _validate(self, target: T): ...
+    def _validate(self, target: T) -> None: ...
 
     @abstractmethod
-    def patch(self, target: T): ...
+    def patch(self, target: T) -> T: ...
 
-    def unpatch(self):
+    def unpatch(self, target: T) -> T:
         raise NotImplementedError()
 
-    def __call__(self, target: T, *args, **kwargs):
+    def __call__(self, target: T, *args, **kwargs) -> T:
         self._validate(target)
         self.patch(target, *args, **kwargs)
         return target
 
+    def extra_repr(self) -> str:
+        return ''
+
     def __repr__(self) -> str:
-        return f'{self.__class__.__name__}()'
+        extra_repr = self.extra_repr()
+        lines = extra_repr.split('\n') if extra_repr else None
+        main_str = self.__class__.__name__ + '('
+        if lines:
+            if len(lines) == 1:
+                main_str += lines[0]
+            else:
+                main_str += '\n  ' + '\n  '.join(lines) + '\n'
+        main_str += ')'
+        return main_str
 
 
 class DummyPatcher(Patcher):
-    def patch(self, target: T):
+    def patch(self, target: T) -> T:
         return target
 
 
