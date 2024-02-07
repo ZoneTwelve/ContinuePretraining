@@ -4,8 +4,8 @@ from typing import Any
 import torch
 
 from ..datacollator import DataCollator
-from .datamodule_for_instruction_tuning_config import (ConcatMethod,
-                                                       DataModuleForInstructionTuningConfig)
+from .datamodule_for_instruction_tuning_config import (
+    ConcatMethod, DataModuleForInstructionTuningConfig)
 
 
 class DataCollatorForInstructionTuning(DataCollator):
@@ -17,6 +17,8 @@ class DataCollatorForInstructionTuning(DataCollator):
 
     def __init__(self, config: DataModuleForInstructionTuningConfig):
         super().__init__(config)
+
+        assert 'pad_token' in config.tokenizer.special_tokens_map, '`pad_token` is not specified. Please set it manually.'
     
     def _merge_grouped(self, x: list[list[int]], indices: list[int]) -> list[int]:
         return [y for i in indices for y in x[i]]
