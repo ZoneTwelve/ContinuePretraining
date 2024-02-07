@@ -35,9 +35,9 @@ class ExtendVocabConfig(ConfigBase):
 
 class OptimizerConfig(ConfigBase):
     lr: float = 1e-4
-    betas: tuple[float, float] = (0.9, 0.95)
-    eps: float = 1e-5
-    weight_decay: float = 1e-1
+    betas: tuple[float, float] = (0.9, 0.999)
+    eps: float = 1e-8
+    weight_decay: float = 0.0
     lr_scheduler_type: LearningRateSchedulerType | str = LearningRateSchedulerType.CONSTANT
     num_warmup_steps: int = 0
     min_lr_factor: float = 0.1
@@ -51,12 +51,16 @@ class LitCausalLMConfig(ConfigBase):
     extend_vocab: Literal[False] | ExtendVocabConfig = False
     optimizer_config: OptimizerConfig = field(default_factory=OptimizerConfig)
     patchers: list[Patcher] = field(default_factory=list)
+    gradient_checkpointing: bool = True
 
     def __post_init__(self):
         self.tokenizer_path = self.tokenizer_path or self.model_path
         
-        revision = self.model_kwargs.get('revision', 'main')
+        revision = self.model_kwargs.setdefault('revision', 'main')
         self.tokenizer_kwargs.setdefault('revision', revision)
+
+        trust_remote_code = self.model_kwargs.setdefault('trust_remote_code', None)
+        self.tokenizer_kwargs.setdefault('trust_remote_code', trust_remote_code)
 
         for k in ['torch_dtype', 'bnb_4bit_compute_dtype']:
             if k in self.model_kwargs:

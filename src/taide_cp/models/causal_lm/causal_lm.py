@@ -1,4 +1,3 @@
-import copy
 import inspect
 import logging
 from contextlib import nullcontext
@@ -11,6 +10,7 @@ import torch.distributed
 from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
 from torch import nn
 from torch.optim import AdamW
+from torchmetrics import Metric
 from transformers import (PretrainedConfig, PreTrainedModel,
                           PreTrainedTokenizerBase)
 from transformers.integrations.deepspeed import HfDeepSpeedConfig
@@ -66,11 +66,7 @@ class LitCausalLM(L.LightningModule):
         self.save_hyperparameters({'config': config})
 
         self.config = config
-        self.model_config, self.config.model_kwargs = self.model_config_class.from_pretrained(
-            self.config.model_path,
-            return_unused_kwargs=True,
-            **config.model_kwargs
-        )
+        self.model_config = self.model_config_class.from_pretrained(self.config.model_path, **config.model_kwargs)
         self.tokenizer = self.tokenizer_class.from_pretrained(self.config.tokenizer_path, **config.tokenizer_kwargs)
 
         assert self.config.extend_vocab or len(self.tokenizer) <= self.model_config.vocab_size
@@ -93,13 +89,16 @@ class LitCausalLM(L.LightningModule):
             ctx
         ):
             if self.model_class is AutoModelForCausalLM:
-                return self.model_class.from_config(self.model_config)
+                return self.model_class.from_config(
+                    self.model_config,
+                    trust_remote_code=self.config.model_kwargs.get('trust_remote_code', None),
+                    attn_implementation=self.config.model_kwargs.get('attn_implementation', None),
+                )
             return self.model_class(self.model_config)
     
     def _construct_model_from_pretrained(self) -> PreTrainedModel:
         kwargs = dict(
-            low_cpu_mem_usage=True,
-            config=copy.deepcopy(self.model_config)
+            low_cpu_mem_usage=True
         )
         kwargs |= self.config.model_kwargs
         return self.model_class.from_pretrained(self.config.model_path, **kwargs)
@@ -177,6 +176,10 @@ class LitCausalLM(L.LightningModule):
                 mask = torch.randperm(old_num_tokens, device=model.device)[:new_num_tokens - old_num_tokens]
                 input_embeddings.weight.data[old_num_tokens:].copy_(input_embeddings.weight.data[mask])
                 output_embeddings.weight.data[old_num_tokens:].copy_(output_embeddings.weight.data[mask])
+        
+        input_embeddings.weight.data[len(self.tokenizer):].zero_()
+        if 'pad_token' in self.tokenizer.special_tokens_map:
+            input_embeddings.weight.data[self.tokenizer.pad_token_id].zero_()
 
         if config.training_strategy == TrainingStrategy.NEW_TOKENS_ONLY:
             model.requires_grad_(False)
@@ -189,6 +192,11 @@ class LitCausalLM(L.LightningModule):
             model.get_output_embeddings().requires_grad_(True)
         else:
             model.requires_grad_(True)
+
+    def _convert_metrics(self) -> None:
+        for m in self.modules():
+            if isinstance(m, Metric):
+                m.set_dtype(torch.float)
 
     def configure_model(self) -> None:
         is_zero3 = getattr(self.strategy, 'zero_stage_3', False)
@@ -207,9 +215,13 @@ class LitCausalLM(L.LightningModule):
             logger.info('Load pretrained model')
             self.model = self._construct_model_from_pretrained()
 
+        if self.config.gradient_checkpointing:
+            self.model.gradient_checkpointing_enable()
+                
         self._maybe_extend_vocabs()
         self._call_patchers()
-    
+        self._convert_metrics()
+
     def configure_optimizers(self):
         optimizer_config = {}
 
@@ -248,9 +260,7 @@ class LitCausalLM(L.LightningModule):
         return output.loss.float()
     
     def on_train_start(self) -> None:
-        self.model.gradient_checkpointing_enable()
-
-        if self.trainer.ckpt_path is not None:
+        if self.is_load_from_checkpoint:
             if self.config.extend_vocab and self.config.extend_vocab.training_strategy == TrainingStrategy.NEW_TOKENS_ONLY:
                 self.tie_partially_frozen_weights()
             else:
@@ -272,12 +282,6 @@ class LitCausalLM(L.LightningModule):
     def on_train_epoch_end(self) -> None:
         self.log('Perplexity/Train', self.train_perplexity, sync_dist=True)
 
-    def on_train_end(self) -> None:
-        self.model.gradient_checkpointing_disable()
-
-    def on_validation_start(self) -> None:
-        self.model.gradient_checkpointing_disable()
-
     def validation_step(self, batch: _BatchType, batch_idx: int, dataloader_idx: int = 0):
         batch_size = batch['input_ids'].size(0)
         loss = self.compute_loss(batch)
@@ -286,6 +290,3 @@ class LitCausalLM(L.LightningModule):
         self.log('loss', loss, prog_bar=True, logger=False, sync_dist=True)
         self.log('Loss/Val', loss, sync_dist=True)
         self.log('Perplexity/Val', self.val_perplexity, batch_size=batch_size, sync_dist=True)
-
-    def on_validation_end(self) -> None:
-        self.model.gradient_checkpointing_enable()
