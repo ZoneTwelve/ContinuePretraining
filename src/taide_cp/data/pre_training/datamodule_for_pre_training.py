@@ -67,7 +67,7 @@ class DataModuleForPreTraining(DataModule):
     
     def _partition_by_source(self, dataset: Dataset) -> dict[str, Dataset]:
         source_to_indices = {}
-        progress = tqdm(total=len(datas et), desc='Partition by source')
+        progress = tqdm(total=len(dataset), desc='Partition by source')
         i = 0
         for batch in dataset.select_columns('source').iter(1000):
             for source in batch['source']:
