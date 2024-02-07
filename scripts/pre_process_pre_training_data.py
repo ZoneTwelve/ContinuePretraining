@@ -51,8 +51,13 @@ def main():
     datamodule = DataModuleForPreTraining(config)
     dataset_dict = datamodule.load_data()
     dataset_dict = datamodule.pre_process_data(dataset_dict)
-    print(dataset_dict)
-    dataset_dict.save_to_disk(config.dataset_path)
+
+    if not os.path.exists(config.dataset_path) or len(os.listdir(config.dataset_path)) == 0:
+        dataset_dict.save_to_disk(config.dataset_path)
+    else:
+        print(f'The directory `{config.dataset_path}` is not empty. The dataset will not be saved to disk.')
+        print('Please clear the directory or specify a different path by changing `dataset_path`.')
+
     original_tokens_table = get_tokens_table(dataset_dict)
 
     dataset_dict = datamodule.post_process_data(dataset_dict)
