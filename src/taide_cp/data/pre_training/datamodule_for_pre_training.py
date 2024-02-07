@@ -67,7 +67,7 @@ class DataModuleForPreTraining(DataModule):
     
     def _partition_by_source(self, dataset: Dataset) -> dict[str, Dataset]:
         source_to_indices = {}
-        progress = tqdm(total=len(dataset), desc='Partition by source')
+        progress = tqdm(total=len(datas et), desc='Partition by source')
         i = 0
         for batch in dataset.select_columns('source').iter(1000):
             for source in batch['source']:
@@ -78,12 +78,17 @@ class DataModuleForPreTraining(DataModule):
         return {source: dataset.select(indices) for source, indices in source_to_indices.items()}
     
     def sample_data(self, dataset_dict: DatasetDict) -> DatasetDict:
+        if all(x == 1.0 for x in self.config.sample_rate.values()):
+            return
+
         r = random.Random(42)
+        unused_sample_rate = self.config.sample_rate.copy()
         for k, dataset in dataset_dict.items():
             if k == 'train':
                 dataset_list = []
                 for source, dataset in self._partition_by_source(dataset).items():
                     sample_rate = self.config.sample_rate.get(source, 1.0)
+                    unused_sample_rate.pop(source, None)
                     decimal, integer = math.modf(sample_rate)
                     dataset_list += [dataset] * int(integer)
                     if decimal > 0.0:
@@ -91,6 +96,10 @@ class DataModuleForPreTraining(DataModule):
                         indices = r.sample(list(range(n)), k=int(n * decimal))
                         dataset_list += [dataset.select(indices)]
                 dataset_dict[k] = concatenate_datasets(dataset_list)
+        
+        if len(unused_sample_rate) > 0:
+            logger.warn(f'Some sources specified by `sample_rate` are not found in the dataset:\n {unused_sample_rate}')
+
         return dataset_dict
     
     def post_process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
