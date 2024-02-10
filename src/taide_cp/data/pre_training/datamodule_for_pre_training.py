@@ -79,7 +79,7 @@ class DataModuleForPreTraining(DataModule):
     
     def sample_data(self, dataset_dict: DatasetDict) -> DatasetDict:
         if all(x == 1.0 for x in self.config.sample_rate.values()):
-            return
+            return dataset_dict
 
         r = random.Random(42)
         unused_sample_rate = self.config.sample_rate.copy()
