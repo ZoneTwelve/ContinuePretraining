@@ -3,6 +3,7 @@ import shutil
 from contextlib import contextmanager
 from typing import Any, Dict, List
 
+import deepspeed
 import lightning as L
 import torch
 from lightning.fabric.plugins import ClusterEnvironment
@@ -65,6 +66,7 @@ class EnhancedDeepSpeedStrategy(DeepSpeedStrategy):
         process_group_backend: str | None = None,
         exclude_frozen_parameters: bool = False,
         raise_error_at_min_scale: bool | None = None,
+        zero3_leaf_modules: list[type] | None = None
     ):
         if isinstance(logging_level, str):
             logging_level = getattr(logging, logging_level.upper())
@@ -73,6 +75,7 @@ class EnhancedDeepSpeedStrategy(DeepSpeedStrategy):
         
         self.exclude_frozen_parameters = exclude_frozen_parameters
         self.raise_error_at_min_scale = raise_error_at_min_scale
+        self.zero3_leaf_modules = zero3_leaf_modules
 
     @property
     def offload_optimizer(self) -> bool:
@@ -96,6 +99,11 @@ class EnhancedDeepSpeedStrategy(DeepSpeedStrategy):
         for m in self.model.modules():
             if isinstance(m, Metric):
                 m.to(self.root_device)
+    
+    def init_deepspeed(self) -> None:
+        if self.zero3_leaf_modules:
+            deepspeed.utils.set_z3_leaf_modules(self.model, self.zero3_leaf_modules)
+        super().init_deepspeed()
 
     def setup(self, trainer: L.Trainer) -> None:
         super().setup(trainer)
