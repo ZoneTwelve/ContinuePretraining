@@ -1,3 +1,4 @@
+import random
 from datasets import DatasetDict
 from transformers import PreTrainedTokenizerBase
 
@@ -25,6 +26,7 @@ class DataModuleForInstructionTuning(DataModule):
             fn_kwargs=dict(
                 tokenizer=self.config.tokenizer,
                 chat_template=self.config.chat_template,
+                empty_system_prompt_rate=self.config.empty_system_prompt_rate
             ),
             num_proc=self.config.num_proc,
             desc='Apply template and tokenize'
@@ -63,12 +65,30 @@ class DataModuleForInstructionTuning(DataModule):
         return dataset_dict
 
 
-def _apply_template_and_tokenize(messages: list[dict[str, str]], tokenizer: PreTrainedTokenizerBase, chat_template: str | None = None):
+def _apply_template_and_tokenize(
+    messages: list[dict[str, str]],
+    tokenizer: PreTrainedTokenizerBase,
+    chat_template: str | None = None,
+    empty_system_prompt_rate: float = 0.0
+):
     input_ids = []
     labels = []
-    for message in messages:
+
+    # Add an empty system prompt randomly if it does not exist.
+    has_system_prompt = any(m['role'] == 'system' for m in messages)
+    if not has_system_prompt and random.random() < empty_system_prompt_rate:
+        messages.insert(0, {'role': 'system', 'content': ''})
+
+    system_prompt = None
+    if messages[0]['role'] == 'system':
+        system_prompt = messages.pop(0)
+
+    for i, message in enumerate(messages):
+        conversation = [message]
+        if i == 0 and system_prompt is not None:
+            conversation.insert(0, system_prompt)
         text = tokenizer.apply_chat_template(
-            [message],
+            conversation,
             chat_template=chat_template,
             add_generation_prompt=False,
             tokenize=False

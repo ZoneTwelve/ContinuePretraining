@@ -29,6 +29,7 @@ class DataModuleForInstructionTuningConfig(DataModuleConfig):
     overlong_handling_method: OverlongHandlingMethod | str = OverlongHandlingMethod.DROP
     concat_method: ConcatMethod | str = ConcatMethod.NO_CONCAT
     pad_to_multiple_of: int | None = None
+    empty_system_prompt_rate: float = 0.0
 
     def __post_init__(self):
         super().__post_init__()

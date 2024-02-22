@@ -5,7 +5,13 @@
     {% set loop_messages = messages %}
     {% set system_message = false %}
 {% endif %}
+{% if system_message != false and (loop_messages|length == 0 or loop_messages|length == 1 and loop_messages[0]['role'] != 'user') %}
+    {{ raise_exception('The system prompt must be passed along with a user prompt.') }}
+{% endif %}
 {% for message in loop_messages %}
+    {% if loop_messages|length > 1 and (message['role'] == 'user') != (loop.index0 % 2 == 0) %}
+        {{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}
+    {% endif %}
     {% if loop.index0 == 0 and system_message != false %}
         {% set content = '<<SYS>>\n' + system_message + '\n<</SYS>>\n\n' + message['content'] %}
     {% else %}
