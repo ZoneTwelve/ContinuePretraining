@@ -5,6 +5,17 @@ from transformers.models.llama.modeling_llama import (LlamaDecoderLayer,
 from taide_cp.patchers.patcher import Patcher
 
 
+class LlamaFP16Patcher(Patcher):
+    def _validate(self, target: LlamaPreTrainedModel):
+        assert isinstance(target, LlamaPreTrainedModel)
+
+    def patch(self, target: LlamaPreTrainedModel):
+        for module in target.modules():
+            if isinstance(module, LlamaDecoderLayer):
+                self.patch_method(module.forward, _decoder_layer_forward)
+        return target
+
+
 def _clamp_fp16(x: torch.Tensor):
     if x.dtype == torch.half:
         max_dtype = torch.finfo(torch.half).max
@@ -17,14 +28,3 @@ def _decoder_layer_forward(self: LlamaDecoderLayer, *args, **kwargs):
     outputs = LlamaDecoderLayer.forward(self, *args, **kwargs)
     outputs = (_clamp_fp16(outputs[0]), *outputs[1:])
     return outputs
-
-
-class LlamaFP16Patcher(Patcher):
-    def _validate(self, target: LlamaPreTrainedModel):
-        assert isinstance(target, LlamaPreTrainedModel)
-
-    def patch(self, target: LlamaPreTrainedModel):
-        for module in target.modules():
-            if isinstance(module, LlamaDecoderLayer):
-                self.patch_method(module.forward, _decoder_layer_forward)
-        return target

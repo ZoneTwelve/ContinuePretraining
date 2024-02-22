@@ -216,11 +216,14 @@ class LitCausalLM(L.LightningModule):
             self.model = self._construct_model_from_pretrained()
 
         if self.config.gradient_checkpointing:
-            self.model.gradient_checkpointing_enable()
+            self.model.gradient_checkpointing_enable({'use_reentrant': False})
                 
         self._maybe_extend_vocabs()
         self._call_patchers()
         self._convert_metrics()
+
+        if self.global_rank == 0:
+            logger.info(f'Model Architecture:\n{self.model}')
 
     def configure_optimizers(self):
         optimizer_config = {}

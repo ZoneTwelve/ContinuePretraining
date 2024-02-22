@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from functools import update_wrapper
+from functools import update_wrapper, partial
 from types import MethodType
 from typing import Any, Callable, TypeVar
 import functools
@@ -8,10 +8,17 @@ import functools
 T = TypeVar('T')
 
 class Patcher(ABC):
-    def patch_method(self, method: MethodType, patched_method: Callable) -> None:
-        target = method.__self__
-        name = method.__name__
-        assert method.__func__ is getattr(target.__class__, name), f'The method `{method.__qualname__}` seems to be patched already.'
+    def patch_method(self, method: MethodType | partial, patched_method: Callable) -> None:
+        if isinstance(method, partial) and method.__name__ == 'forward' and hasattr(method.args[0], '_old_forward'):
+            name = '_old_forward'
+            target = method.args[0]
+            original_func = target._old_forward.__func__
+        else:
+            name = method.__name__
+            target = method.__self__
+            original_func = method.__func__
+
+        assert original_func is getattr(target.__class__, method.__name__), f'The method `{method.__qualname__}` seems to be patched already.'
         patched_method = update_wrapper(patched_method, method)
         patched_method = MethodType(patched_method, target)
         setattr(target, name, patched_method)
