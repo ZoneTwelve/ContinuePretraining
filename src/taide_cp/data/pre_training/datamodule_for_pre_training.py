@@ -23,7 +23,10 @@ class DataModuleForPreTraining(DataModule):
 
     def pre_process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
         logger.info('Tokenize')
-        dataset_dict = dataset_dict.shuffle(seed=42)
+        if self.config.shuffle_before_tokenization:
+            dataset_dict = dataset_dict.shuffle(seed=42)
+            dataset_dict = dataset_dict.flatten_indices(num_proc=self.config.num_proc)
+        
         dataset_dict = self.map_dataset_dict(
             dataset_dict,
             _tokenize,
@@ -51,7 +54,6 @@ class DataModuleForPreTraining(DataModule):
             logger.info('Concat and truncate')
             if self.config.stride is not None:
                 dataset_dict = dataset_dict.shuffle(seed=42)
-                dataset_dict = dataset_dict.flatten_indices(num_proc=self.config.num_proc)
             
             dataset_dict = dataset_dict.sort('source')
             dataset_dict = dataset_dict.map(
@@ -150,7 +152,7 @@ def _stride(batch: dict[str, list[int]], max_length: int, stride: int):
     }
 
 
-def _concat_and_truncate(batch: dict[str, list[int]], max_length: int):
+def _concat_and_truncate(batch: dict[str, list[str | int]], max_length: int):    
     batch_input_ids = []
     batch_source = []
     batch_length = []

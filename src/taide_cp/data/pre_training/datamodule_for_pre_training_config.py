@@ -19,6 +19,7 @@ class DataModuleForPreTrainingConfig(DataModuleConfig):
     concat_method: ConcatMethod | str = ConcatMethod.CONCAT_AND_TRUNCATE
     pad_to_multiple_of: int | None = None
     sample_rate: dict[str, float] = field(default_factory=dict)
+    shuffle_before_tokenization: bool = False
 
     def __post_init__(self):
         super().__post_init__()
