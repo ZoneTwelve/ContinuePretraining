@@ -1,42 +1,79 @@
+import json
 import tempfile
-from typing import TYPE_CHECKING
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any
 
 import fire
+from typing_extensions import Self
 
 if TYPE_CHECKING:
-    from transformers import LlamaTokenizer, PreTrainedTokenizer
+    from sentencepiece import SentencePieceProcessor
+    from transformers import (GemmaTokenizer, LlamaTokenizer,
+                              PreTrainedTokenizer)
 
 
 class Extender:
-    def __init__(self, tokenizer: "PreTrainedTokenizer", pad_token: str | None) -> None:
-        self.tokenizer = tokenizer
-        self.pad_token = pad_token
+    extender_classes: list[Self] = []
 
-        if self.pad_token is not None:
-            self.add_pad_token(pad_token)
+    def __init__(self, tokenizer_path: str) -> None:
+        self.tokenizer_path = tokenizer_path
+        self.tokenizer = self.load_tokenizer(tokenizer_path)
     
-    def extend(self, tokens: list[str]):
-        self.tokenizer.add_tokens(tokens)
+    def __init_subclass__(cls) -> None:
+        cls.extender_classes.append(cls)
 
-    def add_pad_token(self, pad_token: str):
-        self.tokenizer.add_special_tokens({'pad_token': pad_token})
+    @classmethod
+    def match(cls, tokenizer_config: dict[str, Any]) -> bool:
+        return False
+    
+    @classmethod
+    def get_extender(cls, tokenizer_path: str, **kwargs) -> Self:
+        from transformers.models.auto.tokenization_auto import \
+            get_tokenizer_config
+        tokenizer_config = get_tokenizer_config(tokenizer_path)
+        for extender_class in reversed(cls.extender_classes):
+            if extender_class.match(tokenizer_config):
+                return extender_class(tokenizer_path, **kwargs)
+        return Extender(tokenizer_path, **kwargs)
+    
+    def load_tokenizer(self, tokenizer_path: str) -> None:
+        from transformers import AutoTokenizer
 
-    def get_extended_tokenizer(self):
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+    
+    def extend(self, tokens: list[str]) -> int:
+        return self.tokenizer.add_tokens(tokens)
+
+    def add_pad_token(self, pad_token: str) -> int:
+        self.pad_token = pad_token
+        return self.tokenizer.add_special_tokens({'pad_token': pad_token})
+
+    def get_extended_tokenizer(self) -> "PreTrainedTokenizer":
         return self.tokenizer
 
 
-class LLaMAExtender(Extender):
-    tokenizer: "LlamaTokenizer"
+class SentencePieceExtender(Extender, ABC):
+    def __init__(self, tokenizer: "PreTrainedTokenizer") -> None:
+        super().__init__(tokenizer)
 
-    def __init__(self, tokenizer: "LlamaTokenizer", pad_token: str | None) -> None:
+        self._get_spm_and_pieces()
+
+    @classmethod
+    def match(cls, tokenizer_config: dict[str, Any]) -> bool:
+        return False
+
+    @property
+    @abstractmethod
+    def sp_model(self) -> "SentencePieceProcessor": ...
+
+    def _get_spm_and_pieces(self) -> None:
         from transformers.utils import sentencepiece_model_pb2_new as sp_model
+
         self.spm = sp_model.ModelProto()
-        self.spm.ParseFromString(tokenizer.sp_model.serialized_model_proto())
+        self.spm.ParseFromString(self.sp_model.serialized_model_proto())
         self.pieces = set(p.piece for p in self.spm.pieces)
 
-        super().__init__(tokenizer, pad_token)
-
-    def _add_token(self, token: str):
+    def _add_token(self, token: str) -> bool:
         from transformers.utils import sentencepiece_model_pb2_new as sp_model
 
         if token not in self.pieces:
@@ -45,15 +82,42 @@ class LLaMAExtender(Extender):
             sp.score = 0
             self.spm.pieces.append(sp)
             self.pieces.add(token)
+            return True
+        
+        return False
 
-    def extend(self, tokens: list[str]):
+    def extend(self, tokens: list[str]) -> int:
+        tokens = sorted(tokens, key=lambda x: (-len(x), x))
+        n = 0
         for t in tokens:
-            self._add_token(t)
+            if self._add_token(t):
+                n += 1
+        return n
+    
+    def add_pad_token(self, pad_token: str) -> int:
+        self.pad_token = pad_token
+        return self._add_token(pad_token)
 
-    def add_pad_token(self, pad_token: str):            
-        self._add_token(pad_token)
+    @abstractmethod
+    def get_extended_tokenizer(self) -> "PreTrainedTokenizer": ...
 
-    def get_extended_tokenizer(self):
+
+class LlamaExtender(SentencePieceExtender):
+    tokenizer: "LlamaTokenizer"
+
+    @classmethod
+    def match(cls, tokenizer_config: dict[str, Any]) -> bool:
+        return tokenizer_config['tokenizer_class'] == 'LlamaTokenizer'
+
+    @property
+    def sp_model(self) -> "SentencePieceProcessor":
+        return self.tokenizer.sp_model
+    
+    def load_tokenizer(self, tokenizer_path: str) -> "LlamaTokenizer":
+        from transformers import LlamaTokenizer
+        return LlamaTokenizer.from_pretrained(tokenizer_path)
+
+    def get_extended_tokenizer(self) -> "LlamaTokenizer":
         from transformers import LlamaTokenizer
 
         with tempfile.NamedTemporaryFile() as f:
@@ -68,34 +132,56 @@ class LLaMAExtender(Extender):
             tokenizer = LlamaTokenizer(f.name, **kwargs)
         
         return tokenizer
+    
+
+class GemmaExtender(SentencePieceExtender):
+    tokenizer: "GemmaTokenizer"
+
+    @classmethod
+    def match(cls, tokenizer_config: dict[str, Any]) -> bool:
+        return tokenizer_config['tokenizer_class'] == 'GemmaTokenizer'
+
+    @property
+    def sp_model(self) -> "SentencePieceProcessor":
+        return self.tokenizer.sp_model
+
+    def load_tokenizer(self, tokenizer_path: str) -> "GemmaTokenizer":
+        from transformers import GemmaTokenizer
+        return GemmaTokenizer.from_pretrained(tokenizer_path)
+
+    def get_extended_tokenizer(self) -> "GemmaTokenizer":
+        from transformers import GemmaTokenizer
+
+        with tempfile.NamedTemporaryFile() as f:
+            f.write(self.spm.SerializeToString())
+            f.flush()
+
+            tokenizer = GemmaTokenizer(f.name, **self.tokenizer.init_kwargs)
+        
+        return tokenizer
+
+
+def load_vocab(path: str) -> list[str]:
+    with open(path) as f:
+        return json.load(f)
 
 
 def main(
     tokenizer_path: str,
     output_path: str,
     vocab_path: str | None = None,
-    pad_token: str | None = '<pad>',
+    pad_token: str | None = None,
 ):
-    from transformers import AutoTokenizer
-    from transformers.models.auto.tokenization_auto import get_tokenizer_config
+    extender = Extender.get_extender(tokenizer_path)
+    
+    vocab = []
+    if vocab_path is not None:
+        vocab = load_vocab(vocab_path)
 
-    from taide_cp.utils import read_json
+    if pad_token is not None:
+        extender.add_pad_token(pad_token)
 
-    tokenizer_config = get_tokenizer_config(tokenizer_path)
-    tokenizer_class = tokenizer_config.pop('tokenizer_class', None)
-    tokenizer_kwargs = {}
-    extender_class = Extender
-
-    if tokenizer_class == 'LlamaTokenizer':
-        tokenizer_kwargs['use_fast'] = False
-        tokenizer_kwargs['legacy'] = False
-        extender_class = LLaMAExtender
-
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs)
-    extender = extender_class(tokenizer, pad_token)
-    vocabs = read_json(vocab_path) if vocab_path is not None else []
-    extender.extend(vocabs)
-
+    extender.extend(vocab)
     tokenizer = extender.get_extended_tokenizer()
     tokenizer.save_pretrained(output_path)
 
