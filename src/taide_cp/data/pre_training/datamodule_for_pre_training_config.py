@@ -29,4 +29,8 @@ class DataModuleForPreTrainingConfig(DataModuleConfig):
         if self.concat_method == ConcatMethod.CONCAT_AND_TRUNCATE:
             assert self.max_length is not None, f"You must set `max_length` to use `CONCAT_AND_TRUNCATE`"
 
-        assert self.stride is None or self.max_length is not None, "You must also set `max_length` to use `stride`"
+        if self.stride is not None:
+            assert self.max_length is not None, "You must also set `max_length` to use `stride`"
+            assert self.stride <= self.max_length, "`stride` must be <= `max_length`"
+        else:
+            self.stride = self.max_length

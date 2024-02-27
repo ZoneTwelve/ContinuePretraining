@@ -21,8 +21,9 @@ class DataModuleForPreTraining(DataModule):
     def __init__(self, config: DataModuleForPreTrainingConfig) -> None:
         super().__init__(config)
 
-    def pre_process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
+    def _tokenize(self, dataset_dict: DatasetDict) -> DatasetDict:
         logger.info('Tokenize')
+
         if self.config.shuffle_before_tokenization:
             dataset_dict = dataset_dict.shuffle(seed=42)
             dataset_dict = dataset_dict.flatten_indices(num_proc=self.config.num_proc)
@@ -36,27 +37,47 @@ class DataModuleForPreTraining(DataModule):
             num_proc=self.config.num_proc,
             desc='Tokenize'
         )
+        return dataset_dict
+    
+    def _truncate(self, dataset_dict: DatasetDict) -> DatasetDict:
+        logger.info('Truncate')
 
-        if self.config.stride is not None:
-            logger.info('Truncate and stride')
-            dataset_dict = dataset_dict.map(
-                _stride,
-                batched=True,
-                fn_kwargs=dict(
-                    max_length=self.config.max_length,
-                    stride=self.config.stride
-                ),
-                num_proc=self.config.num_proc,
-                desc='Truncate and stride'
-            )
+        dataset_dict = dataset_dict.map(
+            _truncate,
+            batched=True,
+            fn_kwargs=dict(
+                max_length=self.config.max_length,
+                stride=self.config.stride
+            ),
+            num_proc=self.config.num_proc,
+            desc='Truncate'
+        )
+        return dataset_dict
+    
+    def _partition_by_length(self, dataset: Dataset) -> tuple[Dataset, Dataset]:
+        eq_indices = []
+        lt_indices = []
+        progress = tqdm(total=len(dataset), desc='Partition by length')
+        i = 0
+        for batch in dataset.select_columns('length').iter(1000):
+            batch_size = len(batch['length'])
+            for length in batch['length']:
+                indices = eq_indices if length == self.config.max_length else lt_indices
+                indices.append(i)
+                i += 1 
+            progress.update(batch_size)
+        return dataset.select(eq_indices), dataset.select(lt_indices)
+    
+    def _concat_and_truncate(self, dataset_dict: DatasetDict) -> DatasetDict:
+        logger.info('Concat and truncate')
 
-        if self.config.concat_method == ConcatMethod.CONCAT_AND_TRUNCATE:
-            logger.info('Concat and truncate')
-            if self.config.stride is not None:
-                dataset_dict = dataset_dict.shuffle(seed=42)
-            
-            dataset_dict = dataset_dict.sort('source')
-            dataset_dict = dataset_dict.map(
+        for split, dataset in dataset_dict.items():
+            eq_dataset, lt_dataset = self._partition_by_length(dataset)
+            lt_dataset = lt_dataset.flatten_indices(num_proc=self.config.num_proc)
+            logger.info('Sort by source')
+            lt_dataset = lt_dataset.sort('source')
+            logger.info('Sorted')
+            lt_dataset = lt_dataset.map(
                 _concat_and_truncate,
                 batched=True,
                 batch_size=100000,
@@ -64,7 +85,18 @@ class DataModuleForPreTraining(DataModule):
                 num_proc=self.config.num_proc,
                 desc='Concat and truncate'
             )
-    
+            dataset_dict[split] = concatenate_datasets([eq_dataset, lt_dataset])
+        return dataset_dict
+
+    def pre_process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
+        dataset_dict = self._tokenize(dataset_dict)
+
+        if self.config.max_length is not None:
+            dataset_dict = self._truncate(dataset_dict)
+
+        if self.config.concat_method == ConcatMethod.CONCAT_AND_TRUNCATE:
+            dataset_dict = self._concat_and_truncate(dataset_dict)
+        
         return dataset_dict
     
     def _partition_by_source(self, dataset: Dataset) -> dict[str, Dataset]:
@@ -134,7 +166,7 @@ def _tokenize(batch: dict[str, list[str]], tokenizer: PreTrainedTokenizer | PreT
     }
 
 
-def _stride(batch: dict[str, list[int]], max_length: int, stride: int):
+def _truncate(batch: dict[str, list[int]], max_length: int, stride: int):
     batch_input_ids = []
     batch_source = []
     batch_length = []
