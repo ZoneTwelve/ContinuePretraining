@@ -54,38 +54,18 @@ class DataModuleForPreTraining(DataModule):
         )
         return dataset_dict
     
-    def _partition_by_length(self, dataset: Dataset) -> tuple[Dataset, Dataset]:
-        eq_indices = []
-        lt_indices = []
-        progress = tqdm(total=len(dataset), desc='Partition by length')
-        i = 0
-        for batch in dataset.select_columns('length').iter(1000):
-            batch_size = len(batch['length'])
-            for length in batch['length']:
-                indices = eq_indices if length == self.config.max_length else lt_indices
-                indices.append(i)
-                i += 1 
-            progress.update(batch_size)
-        return dataset.select(eq_indices), dataset.select(lt_indices)
-    
     def _concat_and_truncate(self, dataset_dict: DatasetDict) -> DatasetDict:
         logger.info('Concat and truncate')
 
-        for split, dataset in dataset_dict.items():
-            eq_dataset, lt_dataset = self._partition_by_length(dataset)
-            lt_dataset = lt_dataset.flatten_indices(num_proc=self.config.num_proc)
-            logger.info('Sort by source')
-            lt_dataset = lt_dataset.sort('source')
-            logger.info('Sorted')
-            lt_dataset = lt_dataset.map(
-                _concat_and_truncate,
-                batched=True,
-                batch_size=100000,
-                fn_kwargs=dict(max_length=self.config.max_length),
-                num_proc=self.config.num_proc,
-                desc='Concat and truncate'
-            )
-            dataset_dict[split] = concatenate_datasets([eq_dataset, lt_dataset])
+        dataset_dict = dataset_dict.sort('source')
+        dataset_dict = dataset_dict.map(
+            _concat_and_truncate,
+            batched=True,
+            batch_size=100000,
+            fn_kwargs=dict(max_length=self.config.max_length),
+            num_proc=self.config.num_proc,
+            desc='Concat and truncate'
+        )
         return dataset_dict
 
     def pre_process_data(self, dataset_dict: DatasetDict) -> DatasetDict:
@@ -111,11 +91,11 @@ class DataModuleForPreTraining(DataModule):
                 progress.update()
         return {source: dataset.select(indices) for source, indices in source_to_indices.items()}
     
-    def sample_data(self, dataset_dict: DatasetDict) -> DatasetDict:
+    def sample_data(self, dataset_dict: DatasetDict, seed: int = 42) -> DatasetDict:
         if all(x == 1.0 for x in self.config.sample_rate.values()):
             return dataset_dict
 
-        r = random.Random(42)
+        r = random.Random(seed)
         unused_sample_rate = self.config.sample_rate.copy()
         for k, dataset in dataset_dict.items():
             if k == 'train':
@@ -192,6 +172,12 @@ def _concat_and_truncate(batch: dict[str, list[str | int]], max_length: int):
     current_source = batch['source'][0]
     current_input_ids = []
     for source, input_ids in zip(batch['source'], batch['input_ids']):
+        if len(input_ids) == max_length:
+            batch_input_ids.append(input_ids)
+            batch_source.append(source)
+            batch_length.append(len(input_ids))
+            continue
+
         if source != current_source:
             if current_input_ids:
                 batch_input_ids.append(current_input_ids)
